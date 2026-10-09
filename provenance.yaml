@@ -18,24 +18,25 @@ synthesized_skills:
         reuse_status: "CONDITIONAL"
         informing_concept: "Separate research, planning, implementation, and evaluation."
         material_incorporated: "General concept only; no source text, examples, or implementation."
-      - path: skills/webapp-testing/SKILL.md
-        license: "Apache-2.0"
-        reuse_status: "CONDITIONAL"
-        informing_concept: "Inspect real outputs and verify changes against observed behavior."
-        material_incorporated: "General concept only; no source text, scripts, or dependencies."
-      - path: skills/internal-comms/SKILL.md
-        license: "Apache-2.0"
-        reuse_status: "CONDITIONAL"
-        informing_concept: "Choose a process appropriate to the task."
-        material_incorporated: "General concept only; no source text or examples."
-      - path: skills/frontend-design/SKILL.md
-        license: "Apache-2.0"
-        reuse_status: "CONDITIONAL"
-        informing_concept: "Tailor choices to context and critique generic defaults."
-        material_incorporated: "General concept only; no source text, design assets, or examples."
     excluded_or_held_sources:
-      - "skills/docx, skills/pdf, skills/pptx, skills/xlsx: EXCLUDE under their custom terms."
+      - path: skills/docx
+        reuse_status: "EXCLUDE"
+        reason: "Attached custom terms prohibit copying, derivative works, and third-party distribution; contributes no material to synthesis."
+      - path: skills/pdf
+        reuse_status: "EXCLUDE"
+        reason: "Attached custom terms prohibit copying, derivative works, and third-party distribution; contributes no material to synthesis."
+      - path: skills/pptx
+        reuse_status: "EXCLUDE"
+        reason: "Attached custom terms prohibit copying, derivative works, and third-party distribution; contributes no material to synthesis."
+      - path: skills/xlsx
+        reuse_status: "EXCLUDE"
+        reason: "Attached custom terms prohibit copying, derivative works, and third-party distribution; contributes no material to synthesis."
       - "skills/doc-coauthoring and template/SKILL.md: HOLD because no explicit license grant was found."
       - "Third-party packages, canvas fonts, theme-showcase.pdf, and shadcn-components.tar.gz: not incorporated; see license-audit.md."
+    synthesis_scope:
+      included_sources:
+        - skills/skill-creator/SKILL.md
+        - skills/mcp-builder/SKILL.md
+      excluded_requested_category: "Document skills were audited but not distilled or synthesized."
     other_inputs:
       - "User-provided problem statement supplies the required audit categories, guardrails, and outputs."

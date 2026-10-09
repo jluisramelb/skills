@@ -12,6 +12,10 @@
 
 Statuses below describe suitability for this project: original, portable skills. A status is not a legal conclusion about other uses.
 
+## Scope of the requested synthesis
+
+The synthesis is limited to `skills/skill-creator` and `skills/mcp-builder`, both CONDITIONAL under Apache-2.0; only general concepts are used, without copying source expression or implementation. The requested document skills (`skills/docx`, `skills/pdf`, `skills/pptx`, and `skills/xlsx`) are included in this audit but EXCLUDED from synthesis because their attached terms prohibit copying, derivative works, and third-party distribution. No instructions, code, examples, assets, or dependencies from those document skills informed the new skill.
+
 ## Skill sources
 
 The source for the entries below is the corresponding `SKILL.md` plus its local license file, where present. The license files name Anthropic, PBC as copyright holder. The 14 Apache-licensed skills carry `Copyright 2026 Anthropic, PBC`; the four restricted document skills carry `© 2025 Anthropic, PBC. All rights reserved.`
