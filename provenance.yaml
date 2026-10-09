@@ -47,3 +47,29 @@ synthesized_skills:
       excluded_requested_category: "Document skills were audited but not distilled or synthesized."
     other_inputs:
       - "User-provided problem statement supplies the required audit categories, guardrails, and outputs."
+  - name: skill-design-workbench
+    path: skills/skill-design-workbench/SKILL.md
+    license_status: "No license asserted; see license-audit.md unresolved questions."
+    original_implementation: true
+    incorporated_source_expression_or_code: false
+    sources:
+      - path: skills/skill-creator/SKILL.md
+        license: "Apache-2.0"
+        reuse_status: "CONDITIONAL"
+        informing_concept: "Define the target, create a draft, test representative cases, and revise using feedback."
+        material_incorporated: "General workflow concept only; no source text, examples, or code."
+    excluded_sources:
+      - "MCP-builder and document skills did not inform this skill."
+  - name: mcp-server-workbench
+    path: skills/mcp-server-workbench/SKILL.md
+    license_status: "No license asserted; see license-audit.md unresolved questions."
+    original_implementation: true
+    incorporated_source_expression_or_code: false
+    sources:
+      - path: skills/mcp-builder/SKILL.md
+        license: "Apache-2.0"
+        reuse_status: "CONDITIONAL"
+        informing_concept: "Research requirements, plan capabilities, implement, and verify."
+        material_incorporated: "General workflow concept only; no source text, examples, or code."
+    excluded_sources:
+      - "Skill-creator and document skills did not inform this skill."
