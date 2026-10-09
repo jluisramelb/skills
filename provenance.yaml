@@ -1,0 +1,41 @@
+schema_version: 1
+audit_target: "https://github.com/jluisramelb/skills"
+reviewed_on: "2026-10-09"
+synthesized_skills:
+  - name: license-aware-skill-synthesis
+    path: skills/license-aware-skill-synthesis/SKILL.md
+    license_status: "No license asserted; see license-audit.md unresolved questions."
+    original_implementation: true
+    incorporated_source_expression_or_code: false
+    sources:
+      - path: skills/skill-creator/SKILL.md
+        license: "Apache-2.0"
+        reuse_status: "CONDITIONAL"
+        informing_concept: "Check generated work against explicit criteria and revise using evidence."
+        material_incorporated: "General concept only; no source text, schema, or code."
+      - path: skills/mcp-builder/SKILL.md
+        license: "Apache-2.0"
+        reuse_status: "CONDITIONAL"
+        informing_concept: "Separate research, planning, implementation, and evaluation."
+        material_incorporated: "General concept only; no source text, examples, or implementation."
+      - path: skills/webapp-testing/SKILL.md
+        license: "Apache-2.0"
+        reuse_status: "CONDITIONAL"
+        informing_concept: "Inspect real outputs and verify changes against observed behavior."
+        material_incorporated: "General concept only; no source text, scripts, or dependencies."
+      - path: skills/internal-comms/SKILL.md
+        license: "Apache-2.0"
+        reuse_status: "CONDITIONAL"
+        informing_concept: "Choose a process appropriate to the task."
+        material_incorporated: "General concept only; no source text or examples."
+      - path: skills/frontend-design/SKILL.md
+        license: "Apache-2.0"
+        reuse_status: "CONDITIONAL"
+        informing_concept: "Tailor choices to context and critique generic defaults."
+        material_incorporated: "General concept only; no source text, design assets, or examples."
+    excluded_or_held_sources:
+      - "skills/docx, skills/pdf, skills/pptx, skills/xlsx: EXCLUDE under their custom terms."
+      - "skills/doc-coauthoring and template/SKILL.md: HOLD because no explicit license grant was found."
+      - "Third-party packages, canvas fonts, theme-showcase.pdf, and shadcn-components.tar.gz: not incorporated; see license-audit.md."
+    other_inputs:
+      - "User-provided problem statement supplies the required audit categories, guardrails, and outputs."
