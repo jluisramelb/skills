@@ -31,8 +31,15 @@ synthesized_skills:
       - path: skills/xlsx
         reuse_status: "EXCLUDE"
         reason: "Attached custom terms prohibit copying, derivative works, and third-party distribution; contributes no material to synthesis."
-      - "skills/doc-coauthoring and template/SKILL.md: HOLD because no explicit license grant was found."
-      - "Third-party packages, canvas fonts, theme-showcase.pdf, and shadcn-components.tar.gz: not incorporated; see license-audit.md."
+      - path: skills/doc-coauthoring
+        reuse_status: "HOLD"
+        reason: "No explicit license grant found; not used."
+      - path: template/SKILL.md
+        reuse_status: "HOLD"
+        reason: "No explicit license grant found; not used."
+      - path: "Third-party packages, canvas fonts, theme-showcase.pdf, and shadcn-components.tar.gz"
+        reuse_status: "Not incorporated"
+        reason: "See license-audit.md for asset and dependency findings."
     synthesis_scope:
       included_sources:
         - skills/skill-creator/SKILL.md
