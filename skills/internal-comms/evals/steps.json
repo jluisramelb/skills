@@ -1,0 +1,67 @@
+{
+  "skill_name": "internal-comms",
+  "description": "3P update workflow mapped into typed steps. Each step writes one artifact so it can be checked on its own.",
+  "steps": [
+    {
+      "id": "classify",
+      "type": "probabilistic",
+      "source_section": "SKILL.md > How to use this skill > 1. Identify the communication type / 2. Load the appropriate guideline file",
+      "description": "Decide which kind of internal communication is being requested and which guideline file applies.",
+      "inputs": [],
+      "output": "01-classify.json",
+      "format": "json",
+      "schema": {
+        "required": ["comm_type", "guideline_file"],
+        "example": {"comm_type": "3p-update | newsletter | faq | general", "guideline_file": "examples/<file>.md"}
+      }
+    },
+    {
+      "id": "scope",
+      "type": "human",
+      "source_section": "examples/3p-updates.md > Workflow > 1. Clarify scope",
+      "description": "Confirm the team name and time periods with the user. Replayed from a recorded decision in automated runs.",
+      "inputs": ["classify"],
+      "output": "02-scope.json",
+      "format": "json",
+      "schema": {"required": ["team_name", "progress_period", "plans_period"]}
+    },
+    {
+      "id": "gather",
+      "type": "probabilistic",
+      "source_section": "examples/3p-updates.md > Tools Available / Workflow > 2. Gather information",
+      "description": "Collect the facts for each section. List anything you leave out under 'excluded' with a reason.",
+      "inputs": ["classify", "scope"],
+      "output": "03-gather.json",
+      "format": "json",
+      "schema": {
+        "required": ["progress", "plans", "problems", "excluded"],
+        "example": {
+          "progress": [{"text": "...", "metric": "... or null"}],
+          "plans": [{"text": "...", "metric": null}],
+          "problems": [{"text": "...", "metric": null}],
+          "excluded": [{"text": "...", "reason": "..."}]
+        }
+      }
+    },
+    {
+      "id": "draft",
+      "type": "probabilistic",
+      "source_section": "examples/3p-updates.md > Workflow > 3. Draft the update / Formatting",
+      "description": "Write the 3P update from the gathered facts, in the exact format from the guideline.",
+      "inputs": ["scope", "gather"],
+      "output": "04-draft.md",
+      "format": "markdown"
+    },
+    {
+      "id": "format-check",
+      "type": "deterministic",
+      "source_section": "examples/3p-updates.md > Workflow > 4. Review",
+      "description": "Check the draft against the strict 3P format with a script.",
+      "inputs": ["draft"],
+      "output": "05-format-check.json",
+      "format": "json",
+      "command": ["python", "scripts/check_3p_format.py", "{input:draft}", "{output}"],
+      "schema": {"required": ["valid", "errors"]}
+    }
+  ]
+}

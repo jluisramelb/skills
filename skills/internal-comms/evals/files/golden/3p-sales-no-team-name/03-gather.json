@@ -1,0 +1,14 @@
+{
+  "progress": [
+    {"text": "Closed 4 enterprise deals", "metric": "$1.2M ARR"},
+    {"text": "Hired 2 account executives", "metric": "2 AEs"}
+  ],
+  "plans": [
+    {"text": "Prepare for QBRs", "metric": null},
+    {"text": "Launch the partner pilot with Acme", "metric": null}
+  ],
+  "problems": [
+    {"text": "EMEA pipeline is down versus last quarter", "metric": "-30% vs last quarter"}
+  ],
+  "excluded": []
+}

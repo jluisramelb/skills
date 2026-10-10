@@ -1,0 +1,265 @@
+{
+  "skill_name": "internal-comms",
+  "evals": [
+    {
+      "id": 1,
+      "name": "3p-mobile-weekly",
+      "prompt": "Write our 3P update for the Mobile team for the week of Sep 28 - Oct 2, 2026. Here are my notes from Slack:\n- Shipped offline mode to 100% of iOS users on Sep 30; crash-free sessions went from 99.2% to 99.6%\n- Android 13 migration finished (that was back on Sep 8)\n- Next week: start Android offline mode rollout at 10%, and kick off the tablet layout redesign\n- Blocked: still waiting on the API team for the sync endpoint; one engineer out sick most of the week\n- Fun fact: we hit 1M weekly actives on Oct 1",
+      "expected_output": "A 4-line 3P update for the Mobile team covering Sep 28 - Oct 2, with metrics, that leaves out the Sep 8 Android 13 migration.",
+      "files": [],
+      "golden_dir": "evals/files/golden/3p-mobile-weekly",
+      "expectations": [
+        "The final update follows the emoji / Progress / Plans / Problems format",
+        "The final update leaves out work completed before the period (Android 13 migration)"
+      ],
+      "step_assertions": {
+        "classify": [
+          {
+            "id": "classify-is-3p",
+            "text": "Classifies the request as a 3P update",
+            "kind": "programmatic",
+            "critical": true,
+            "check": {
+              "type": "json_field_equals",
+              "field": "comm_type",
+              "value": "3p-update",
+              "case_insensitive": true
+            }
+          },
+          {
+            "id": "classify-guideline",
+            "text": "Picks examples/3p-updates.md as the guideline",
+            "kind": "reference",
+            "critical": true,
+            "check": {
+              "type": "reference_json_fields",
+              "reference": "evals/files/golden/3p-mobile-weekly/01-classify.json",
+              "fields": [
+                "guideline_file"
+              ]
+            }
+          }
+        ],
+        "gather": [
+          {
+            "id": "gather-progress-nonempty",
+            "text": "Gathers at least one progress item",
+            "kind": "programmatic",
+            "critical": true,
+            "check": {
+              "type": "json_array_length",
+              "field": "progress",
+              "min": 1
+            }
+          },
+          {
+            "id": "gather-excludes-stale",
+            "text": "Progress leaves out the Android 13 migration (finished Sep 8, before the period)",
+            "kind": "programmatic",
+            "critical": true,
+            "check": {
+              "type": "not_contains",
+              "field": "progress",
+              "value": "Android 13"
+            }
+          },
+          {
+            "id": "gather-plans-match",
+            "text": "Plans include the Android offline rollout",
+            "kind": "programmatic",
+            "check": {
+              "type": "contains",
+              "field": "plans",
+              "value": "10%"
+            }
+          },
+          {
+            "id": "gather-keeps-metric",
+            "text": "Progress keeps the crash-free sessions metric",
+            "kind": "programmatic",
+            "check": {
+              "type": "contains",
+              "field": "progress",
+              "value": "99.6%"
+            }
+          },
+          {
+            "id": "gather-grounded",
+            "text": "Every gathered fact is supported by the user's notes",
+            "kind": "llm",
+            "rubric": "Each item in progress, plans and problems must be traceable to the user's notes in the request. Fail if any fact, number or date is invented or changed."
+          }
+        ],
+        "draft": [
+          {
+            "id": "draft-team-header",
+            "text": "Header names the Mobile team",
+            "kind": "programmatic",
+            "critical": true,
+            "check": {
+              "type": "regex",
+              "pattern": "^\\S+\\s+Mobile\\b"
+            }
+          },
+          {
+            "id": "draft-no-stale",
+            "text": "Draft leaves out the Android 13 migration",
+            "kind": "programmatic",
+            "critical": true,
+            "check": {
+              "type": "not_contains",
+              "value": "Android 13"
+            }
+          },
+          {
+            "id": "draft-has-metric",
+            "text": "Progress includes a metric",
+            "kind": "programmatic",
+            "check": {
+              "type": "regex",
+              "pattern": "^Progress: .*\\d",
+              "flags": "m"
+            }
+          },
+          {
+            "id": "draft-close-to-golden",
+            "text": "Draft is close to the reference update",
+            "kind": "reference",
+            "check": {
+              "type": "reference_similarity",
+              "reference": "evals/files/golden/3p-mobile-weekly/04-draft.md",
+              "min_similarity": 0.45
+            }
+          },
+          {
+            "id": "draft-tone",
+            "text": "Tone is matter-of-fact and readable in under a minute",
+            "kind": "llm",
+            "rubric": "The update is matter-of-fact, not prose-heavy, uses concrete data, and can be read in 30-60 seconds by an executive with limited context."
+          }
+        ],
+        "format-check": [
+          {
+            "id": "format-valid",
+            "text": "Draft passes the strict 3P format check",
+            "kind": "programmatic",
+            "critical": true,
+            "check": {
+              "type": "json_field_equals",
+              "field": "valid",
+              "value": true
+            }
+          }
+        ]
+      }
+    },
+    {
+      "id": 2,
+      "name": "3p-sales-no-team-name",
+      "prompt": "Can you turn these into a 3P for leadership? This week (Oct 5-9, 2026):\n- Closed 4 enterprise deals worth $1.2M ARR\n- Hired 2 AEs\n- Next week: QBR prep and launch partner pilot with Acme\n- Problem: pipeline in EMEA is down 30% vs last quarter",
+      "expected_output": "A 4-line 3P update for the Sales team (team name supplied by the user when asked) covering Oct 5-9.",
+      "files": [],
+      "golden_dir": "evals/files/golden/3p-sales-no-team-name",
+      "expectations": [
+        "The final update uses the team name the user gave (Sales) instead of inventing one"
+      ],
+      "step_assertions": {
+        "classify": [
+          {
+            "id": "classify-is-3p",
+            "text": "Classifies the request as a 3P update",
+            "kind": "programmatic",
+            "critical": true,
+            "check": {
+              "type": "json_field_equals",
+              "field": "comm_type",
+              "value": "3p-update",
+              "case_insensitive": true
+            }
+          },
+          {
+            "id": "classify-guideline",
+            "text": "Picks examples/3p-updates.md as the guideline",
+            "kind": "reference",
+            "critical": true,
+            "check": {
+              "type": "reference_json_fields",
+              "reference": "evals/files/golden/3p-sales-no-team-name/01-classify.json",
+              "fields": [
+                "guideline_file"
+              ]
+            }
+          }
+        ],
+        "gather": [
+          {
+            "id": "gather-sections",
+            "text": "Gathers items for all three sections",
+            "kind": "programmatic",
+            "critical": true,
+            "check": {
+              "type": "json_array_length",
+              "field": "problems",
+              "min": 1
+            }
+          },
+          {
+            "id": "gather-arr",
+            "text": "Progress keeps the $1.2M ARR figure",
+            "kind": "programmatic",
+            "check": {
+              "type": "contains",
+              "field": "progress",
+              "value": "1.2M"
+            }
+          }
+        ],
+        "draft": [
+          {
+            "id": "draft-team-header",
+            "text": "Header uses the team name from the recorded decision (Sales)",
+            "kind": "programmatic",
+            "critical": true,
+            "check": {
+              "type": "regex",
+              "pattern": "^\\S+\\s+Sales\\b"
+            }
+          },
+          {
+            "id": "draft-emea",
+            "text": "Problems mention the EMEA pipeline drop with its metric",
+            "kind": "programmatic",
+            "check": {
+              "type": "regex",
+              "pattern": "^Problems: .*EMEA.*30%",
+              "flags": "m"
+            }
+          },
+          {
+            "id": "draft-close-to-golden",
+            "text": "Draft is close to the reference update",
+            "kind": "reference",
+            "check": {
+              "type": "reference_similarity",
+              "reference": "evals/files/golden/3p-sales-no-team-name/04-draft.md",
+              "min_similarity": 0.45
+            }
+          }
+        ],
+        "format-check": [
+          {
+            "id": "format-valid",
+            "text": "Draft passes the strict 3P format check",
+            "kind": "programmatic",
+            "critical": true,
+            "check": {
+              "type": "json_field_equals",
+              "field": "valid",
+              "value": true
+            }
+          }
+        ]
+      }
+    }
+  ]
+}

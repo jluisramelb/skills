@@ -9,6 +9,11 @@ import re
 import yaml
 from pathlib import Path
 
+try:
+    from scripts.step_manifest import validate_skill_steps
+except ImportError:  # run directly as `python quick_validate.py`
+    from step_manifest import validate_skill_steps
+
 def validate_skill(skill_path):
     """Basic validation of a skill"""
     skill_path = Path(skill_path)
@@ -90,6 +95,11 @@ def validate_skill(skill_path):
             return False, f"Compatibility must be a string, got {type(compatibility).__name__}"
         if len(compatibility) > 500:
             return False, f"Compatibility is too long ({len(compatibility)} characters). Maximum is 500 characters."
+
+    # Validate the optional step manifest (evals/steps.json) for step-level evals
+    step_errors = validate_skill_steps(skill_path)
+    if step_errors:
+        return False, "Invalid step manifest (evals/steps.json):\n  - " + "\n  - ".join(step_errors)
 
     return True, "Skill is valid!"
 

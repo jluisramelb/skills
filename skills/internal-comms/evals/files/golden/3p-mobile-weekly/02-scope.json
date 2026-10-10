@@ -1,0 +1,7 @@
+{
+  "team_name": "Mobile",
+  "progress_period": {"start": "2026-09-28", "end": "2026-10-02"},
+  "plans_period": {"start": "2026-10-05", "end": "2026-10-09"},
+  "decided_by": "user",
+  "note": "Recorded decision replayed in automated runs instead of asking the user."
+}

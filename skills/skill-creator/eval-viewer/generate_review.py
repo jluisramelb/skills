@@ -87,8 +87,10 @@ def build_run(root: Path, run_dir: Path) -> dict | None:
     prompt = ""
     eval_id = None
 
-    # Try eval_metadata.json
-    for candidate in [run_dir / "eval_metadata.json", run_dir.parent / "eval_metadata.json"]:
+    # Try eval_metadata.json in the run dir and its ancestors (step-level runs
+    # nest it deeper: eval-N/<model>/run-R/ or eval-N/<model>/isolated/<step>/run-R/)
+    ancestors = [run_dir] + [p for p in run_dir.parents if p == root or root in p.parents]
+    for candidate in [d / "eval_metadata.json" for d in ancestors]:
         if candidate.exists():
             try:
                 metadata = json.loads(candidate.read_text())
@@ -125,6 +127,14 @@ def build_run(root: Path, run_dir: Path) -> dict | None:
         for f in sorted(outputs_dir.iterdir()):
             if f.is_file() and f.name not in METADATA_FILES:
                 output_files.append(embed_file(f))
+        # Per-step artifacts from step-level evals (outputs/steps/<NN>-<step>.<ext>)
+        steps_dir = outputs_dir / "steps"
+        if steps_dir.is_dir():
+            for f in sorted(steps_dir.iterdir()):
+                if f.is_file():
+                    embedded = embed_file(f)
+                    embedded["name"] = f"steps/{f.name}"
+                    output_files.append(embedded)
 
     # Load grading if present
     grading = None
@@ -139,6 +149,7 @@ def build_run(root: Path, run_dir: Path) -> dict | None:
 
     return {
         "id": run_id,
+        "path_parts": list(run_dir.relative_to(root).parts),
         "prompt": prompt,
         "eval_id": eval_id,
         "outputs": output_files,

@@ -1,0 +1,15 @@
+{
+  "valid": true,
+  "errors": [],
+  "sections": {
+    "progress": {
+      "sentences": 2
+    },
+    "plans": {
+      "sentences": 1
+    },
+    "problems": {
+      "sentences": 1
+    }
+  }
+}

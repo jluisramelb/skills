@@ -1,0 +1,7 @@
+{
+  "team_name": "Sales",
+  "progress_period": {"start": "2026-10-05", "end": "2026-10-09"},
+  "plans_period": {"start": "2026-10-12", "end": "2026-10-16"},
+  "decided_by": "user",
+  "note": "The request didn't name the team; the user answered 'Sales' when asked. Replayed in automated runs."
+}

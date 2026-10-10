@@ -1,0 +1,17 @@
+{
+  "progress": [
+    {"text": "Shipped offline mode to 100% of iOS users on Sep 30", "metric": "crash-free sessions 99.2% -> 99.6%"},
+    {"text": "Crossed 1M weekly active users on Oct 1", "metric": "1M WAU"}
+  ],
+  "plans": [
+    {"text": "Start the Android offline mode rollout at 10%", "metric": "10% rollout"},
+    {"text": "Kick off the tablet layout redesign", "metric": null}
+  ],
+  "problems": [
+    {"text": "Blocked on the API team's sync endpoint", "metric": null},
+    {"text": "One engineer out sick most of the week", "metric": null}
+  ],
+  "excluded": [
+    {"text": "Android 13 migration finished", "reason": "Completed Sep 8, outside the Sep 28 - Oct 2 period"}
+  ]
+}
