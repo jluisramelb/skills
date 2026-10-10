@@ -89,6 +89,17 @@ The frontmatter requires only two fields:
 
 The markdown content below contains the instructions, examples, and guidelines that Claude will follow. For more details, see [How to create custom skills](https://support.claude.com/en/articles/12512198-creating-custom-skills).
 
+## Evaluating a Skill
+
+The [skill-creator](./skills/skill-creator) skill includes an evaluation loop: test prompts, graded assertions, with/without-skill benchmarks and a review viewer. For multi-step skills it also supports optional **step-level evaluation**:
+
+- Map the workflow into steps typed as probabilistic, deterministic or human-in-the-loop, in `evals/steps.json`.
+- Have each step write its own artifact, and check each artifact with programmatic, reference or LLM-graded checks.
+- Run every step several times on several models, and compare full-chain runs with isolated runs (golden inputs) to see where failures start and how they propagate.
+- Use the analyzer's ambiguity pass to find the sentences that models read differently.
+
+See [skills/skill-creator/references/step-level-evals.md](./skills/skill-creator/references/step-level-evals.md). For a worked example, see [skills/internal-comms/evals](./skills/internal-comms/evals) (3P updates). Skills without a step manifest are evaluated exactly as before.
+
 # Partner Skills
 
 Skills are a great way to teach Claude how to get better at using specific pieces of software. As we see awesome example skills from partners, we may highlight some of them here:

@@ -33,7 +33,7 @@ If you don't have access, you can ask the user for things they want to cover. Th
 week for Plans)
 2. **Gather information**: Use available tools or ask the user directly
 3. **Draft the update**: Follow the strict formatting guidelines
-4. **Review**: Ensure it's concise (30-60 seconds to read) and data-driven
+4. **Review**: Ensure it's concise (30-60 seconds to read) and data-driven. If you can run scripts, check the format with `python scripts/check_3p_format.py <draft.md>`; it reports any deviation from the format below
 
 ## Formatting
 

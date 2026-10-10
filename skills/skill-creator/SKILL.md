@@ -330,6 +330,21 @@ This is optional, requires subagents, and most users won't need it. The human re
 
 ---
 
+## Advanced: Step-level evaluation
+
+Use this for multi-step skills whose results are inconsistent, or when the skill has to hold up across models (for example the user's everyday model and their strongest one). Whole-run grading tells you *that* an output is wrong. Step-level evaluation tells you *which step* went wrong, whether it failed on its own or inherited a bad input, and *which sentence* in the skill the models read differently.
+
+In short:
+1. Map the workflow into steps typed as probabilistic, deterministic (a bundled script) or human (a replayed decision), in `evals/steps.json`. Each step writes one artifact
+2. Add `step_assertions` to the evals (programmatic, then reference, then LLM checks; mark `critical` ones)
+3. Run every step N times on several models with `scripts/run_step_eval.py`
+4. Aggregate, look at the Steps tab in the viewer, and run the ambiguity pass in `agents/analyzer.md`
+5. Rewrite only the flagged sentences and repeat
+
+Read `references/step-level-evals.md` for the full workflow and commands. It's optional; skills without a step manifest keep working exactly as above.
+
+---
+
 ## Description Optimization
 
 The description field in SKILL.md frontmatter is the primary mechanism that determines whether Claude invokes a skill. After creating or improving a skill, offer to optimize the description for better triggering accuracy.
@@ -462,10 +477,13 @@ The agents/ directory contains instructions for specialized subagents. Read them
 
 - `agents/grader.md` — How to evaluate assertions against outputs
 - `agents/comparator.md` — How to do blind A/B comparison between two outputs
-- `agents/analyzer.md` — How to analyze why one version beat another
+- `agents/analyzer.md` — How to analyze why one version beat another, benchmark notes, and the step-level ambiguity pass
 
 The references/ directory has additional documentation:
-- `references/schemas.md` — JSON structures for evals.json, grading.json, etc.
+- `references/schemas.md` — JSON structures for evals.json, steps.json, grading.json, etc.
+- `references/step-level-evals.md` — Step-level evaluation across models: mapping steps, checks, running the matrix, the ambiguity loop
+
+Scripts for step-level evaluation: `scripts/run_step_eval.py` (run steps × models × N), `scripts/grade_steps.py` (grade step artifacts), `scripts/step_manifest.py` (manifest validation, used by `quick_validate.py`). Tests: `python -m unittest discover -s tests -t .` from the skill-creator directory.
 
 ---
 

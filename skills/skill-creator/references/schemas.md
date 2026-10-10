@@ -34,6 +34,84 @@ Defines the evals for a skill. Located at `evals/evals.json` within the skill di
 - `evals[].files`: Optional list of input file paths (relative to skill root)
 - `evals[].expectations`: List of verifiable statements
 
+Optional fields for step-level evals (see [steps.json](#stepsjson)):
+- `evals[].name`: Short descriptive name, used for the workspace directory (`eval-<id>-<name>`)
+- `evals[].golden_dir`: Directory (relative to the skill root) holding a golden artifact for each step, named as in `steps.json` (`01-classify.json`, ...). Used for isolated-step runs and `--dry-run`, and as the recorded decision for human steps
+- `evals[].step_fixtures`: `{step_id: path}` recorded decisions for human steps, overriding `golden_dir`
+- `evals[].step_assertions`: `{step_id: [assertion, ...]}` checks for each step's artifact (see below)
+
+**Step assertions.** Prefer the cheapest kind that can decide the question:
+
+```json
+{
+  "id": "gather-excludes-stale",
+  "text": "Progress leaves out work finished before the period",
+  "kind": "programmatic",
+  "critical": true,
+  "check": {"type": "not_contains", "field": "progress", "value": "Android 13"}
+}
+```
+
+- `kind`: `programmatic` (script checks), `reference` (compare with a golden file), or `llm` (rubric graded by a model; needs `rubric` instead of `check`)
+- `critical`: if a critical check fails, every step downstream is marked `contaminated` and its failures count as inherited
+- `check.type` for `programmatic`: `json_valid`, `json_required` (`fields`), `json_field_equals` (`field`, `value`, optional `case_insensitive`), `json_array_length` (`field`, `min`, `max`), `regex` (`pattern`, optional `flags` from `ims`, `should_match`), `contains` / `not_contains` (`value`, case-insensitive by default), `line_count` / `word_count` (`min`, `max`)
+- `check.type` for `reference`: `exact_match`, `reference_similarity` (`min_similarity`, 0-1), `reference_json_fields` (`fields`); all take `reference` (path relative to the skill root)
+- `field` is a dotted path into JSON artifacts (`a.b.0`). String checks with a `field` run on that value (lists and objects are serialized to JSON first)
+
+---
+
+## steps.json
+
+Optional step manifest for step-level evals. Located at `evals/steps.json` within the skill directory. It maps the skill's workflow into typed steps, each writing exactly one artifact to `outputs/steps/<output>`.
+
+```json
+{
+  "skill_name": "internal-comms",
+  "steps": [
+    {
+      "id": "classify",
+      "type": "probabilistic",
+      "source_section": "SKILL.md > How to use this skill > 1. Identify the communication type",
+      "description": "Decide which kind of communication is requested.",
+      "inputs": [],
+      "output": "01-classify.json",
+      "format": "json",
+      "schema": {"required": ["comm_type", "guideline_file"], "example": {"comm_type": "...", "guideline_file": "..."}}
+    },
+    {
+      "id": "scope",
+      "type": "human",
+      "source_section": "examples/3p-updates.md > Workflow > 1. Clarify scope",
+      "inputs": ["classify"],
+      "output": "02-scope.json",
+      "fixture": "evals/files/default-scope.json"
+    },
+    {
+      "id": "format-check",
+      "type": "deterministic",
+      "source_section": "examples/3p-updates.md > Workflow > 4. Review",
+      "inputs": ["draft"],
+      "output": "05-format-check.json",
+      "command": ["python", "scripts/check_3p_format.py", "{input:draft}", "{output}"]
+    }
+  ]
+}
+```
+
+**Fields:**
+- `steps[].id`: kebab-case, unique
+- `steps[].type`: `probabilistic` (a model does it), `deterministic` (a bundled script does it), or `human` (a person decides)
+- `steps[].source_section`: The SKILL.md (or reference file) section the step comes from. The ambiguity pass reads this section when the step is unstable
+- `steps[].description`: Optional. Say *what* artifact to produce, not *how*. Instructions belong in SKILL.md; otherwise you end up testing the manifest instead of the skill
+- `steps[].inputs`: Ids of earlier steps whose artifacts this step reads. Must form an acyclic graph
+- `steps[].output`: `<NN>-<id>.<ext>`, with `NN` unique
+- `steps[].format`: `json`, `markdown`, or `text` (inferred from the extension if omitted). JSON artifacts automatically get a critical "valid JSON" check
+- `steps[].schema.required`: Required JSON fields (automatic critical check). `schema.example` is shown to the model as the expected shape
+- `steps[].command`: Deterministic steps only. Run by the harness (not the model) from the skill root. Placeholders: `{input:<step-id>}`, `{output}`, `{skill}`; a leading `python` uses the current interpreter
+- `steps[].fixture`: Human steps only. Default recorded decision, replayed in automated runs. Each eval can override it with `step_fixtures` or `golden_dir`
+
+`quick_validate.py` checks that every step has a type and an output, the inputs form a valid order with no cycles, every human step has a recorded decision for every eval, and every step assertion is well-formed.
+
 ---
 
 ## history.json
@@ -80,6 +158,26 @@ Tracks version progression in Improve mode. Located at workspace root.
 - `iterations[].expectation_pass_rate`: Pass rate from grading
 - `iterations[].grading_result`: "baseline", "won", "lost", or "tie"
 - `iterations[].is_current_best`: Whether this is the current best version
+
+---
+
+## run_meta.json
+
+Written by `run_step_eval.py` in each step-level run directory, so the run can be regraded on its own (`python -m scripts.grade_steps <run_dir>`).
+
+```json
+{
+  "skill_path": "/path/to/skill",
+  "eval_id": 1,
+  "model": "claude-sonnet-5",
+  "label": null,
+  "run_number": 3,
+  "mode": "chain",
+  "isolated_step": null
+}
+```
+
+`mode` is `chain` (all steps run in order) or `isolated` (only `isolated_step` runs, from golden upstream artifacts).
 
 ---
 
@@ -157,6 +255,44 @@ Output from the grader agent. Located at `<run-dir>/grading.json`.
 - `claims`: Extracted and verified claims from the output
 - `user_notes_summary`: Issues flagged by the executor
 - `eval_feedback`: (optional) Improvement suggestions for the evals, only present when the grader identifies issues worth raising
+
+---
+
+### Step-level grading.json
+
+`grade_steps.py` writes the same `expectations` and `summary` fields (with the step id prefixed to each `text`, and pending LLM checks left out) so aggregation and the viewer keep working. It adds:
+
+```json
+{
+  "mode": "chain",
+  "isolated_step": null,
+  "model": "claude-sonnet-5",
+  "eval_id": 1,
+  "run_number": 3,
+  "steps": {
+    "draft": {
+      "type": "probabilistic",
+      "artifact": "steps/04-draft.md",
+      "exists": true,
+      "inputs": ["scope", "gather"],
+      "assertions": [
+        {"id": "draft-no-stale", "text": "Draft leaves out the Android 13 migration", "kind": "programmatic",
+         "critical": true, "passed": false, "evidence": "Unexpectedly found 'Android 13'"}
+      ],
+      "passed": 3, "failed": 1, "pending": 1, "total": 4, "pass_rate": 0.75,
+      "critical_failed": true,
+      "contaminated": true,
+      "contaminated_by": ["gather"],
+      "failure_origin": "inherited"
+    }
+  }
+}
+```
+
+- `pending`: LLM-graded checks with no verdict yet (`passed: null`). They don't count towards `total`
+- `contaminated_by`: Upstream steps with a failed critical check
+- `failure_origin`: `null` (step passed), `own`, or `inherited` (failed while contaminated)
+- Isolated runs grade only the isolated step and add `"inputs_source": "golden"`
 
 ---
 
@@ -428,3 +564,87 @@ Output from post-hoc analyzer. Located at `<grading-dir>/analysis.json`.
   }
 }
 ```
+
+---
+
+## benchmark.json: step_summary
+
+Added by `aggregate_benchmark.py` when the workspace contains step-level runs (`eval-*/<model>/run-*/` and `eval-*/<model>/isolated/<step>/run-*/`). Configurations are the model directories (`<model>` or `<model>__<label>`).
+
+```json
+{
+  "step_summary": {
+    "steps": [{"id": "gather", "type": "probabilistic", "inputs": ["classify", "scope"], "artifact": "steps/03-gather.json"}],
+    "configs": ["claude-opus-5", "claude-sonnet-5"],
+    "cells": {
+      "gather": {
+        "claude-sonnet-5": {
+          "runs": 5,
+          "success_rate": 0.6,
+          "pass_rate": {"mean": 0.88, "stddev": 0.11, "min": 0.75, "max": 1.0},
+          "critical_failure_rate": 0.4,
+          "contaminated_rate": 0.0,
+          "failure_attribution": {
+            "chain_failure_rate": 0.4, "own_failure_rate": 0.4, "inherited_failure_rate": 0.0, "source": "isolated"
+          },
+          "consistency": {
+            "kind": "json", "exact_match_rate": 0.4, "mean_divergence": 0.21,
+            "field_agreement": {"progress": 0.6, "plans": 1.0, "problems": 1.0, "excluded": 0.6}
+          },
+          "isolated": {"runs": 5, "pass_rate": {"mean": 0.9, "stddev": 0.1, "min": 0.75, "max": 1.0}, "failure_rate": 0.4},
+          "nondeterministic": false,
+          "flags": [{"reason": "inconsistent", "detail": "passes in 60% of 5 runs"}]
+        }
+      }
+    },
+    "propagation": [
+      {"from": "gather", "to": "draft", "config": "claude-sonnet-5",
+       "upstream_critical_failures": 2, "downstream_failures": 2, "rate": 1.0}
+    ],
+    "flags": [
+      {"step": "gather", "config": "claude-sonnet-5", "reason": "inconsistent", "detail": "passes in 60% of 5 runs"},
+      {"step": "gather", "config": null, "reason": "model_gap", "detail": "claude-opus-5 100% vs claude-sonnet-5 60%"}
+    ],
+    "thresholds": {"unstable_json_match": 0.6, "unstable_text_divergence": 0.35, "model_gap": 0.25}
+  }
+}
+```
+
+- `success_rate`: Share of chain runs in which every check on the step passed. `pass_rate` is the share of checks passed, averaged over runs
+- `failure_attribution`: With isolated runs (`source: "isolated"`), own = isolated failure rate and inherited = chain failure rate minus own. Without them (`source: "contamination"`), failures in contaminated runs count as inherited
+- `consistency`: Similarity of the artifacts across repeated runs of the same eval, averaged over evals. `exact_match_rate` is the share of runs matching the most common artifact (JSON compared canonically); `mean_divergence` is 1 minus the mean pairwise text similarity; `field_agreement` gives the same share for each top-level JSON field
+- `propagation`: For each dependency edge, how often a critical failure upstream was followed by a failure downstream
+- `flags[].reason`: `inconsistent` (some runs pass, some fail), `always_fails`, `unstable_output` (low agreement or high divergence on a probabilistic step), `nondeterministic` (a deterministic step gave different outputs for the same input), `inherited_failures` (inherited ≥ own), `model_gap` (success rates differ by at least `thresholds.model_gap` between configurations)
+
+---
+
+## ambiguity.json
+
+Output from the analyzer's ambiguity pass (`agents/analyzer.md`). Located at `<workspace>/iteration-N/ambiguity.json`.
+
+```json
+{
+  "findings": [
+    {
+      "step": "gather",
+      "flags": ["inconsistent", "model_gap"],
+      "source_section": "examples/3p-updates.md > Instructions",
+      "ambiguous_text": "Progress: what the team has accomplished over the next time period.",
+      "readings": [
+        {"configs": ["claude-sonnet-5"], "runs": ["eval-1-3p-mobile-weekly/claude-sonnet-5/run-2"],
+         "interpretation": "Includes everything in the notes, including work finished three weeks ago"},
+        {"configs": ["claude-opus-5"], "runs": ["eval-1-3p-mobile-weekly/claude-opus-5/run-1"],
+         "interpretation": "Only includes work finished during the update's week"}
+      ],
+      "evidence": "gather-excludes-stale fails in 2/5 sonnet runs; excluded[] is empty in those runs",
+      "suggested_rewrite": "Progress: what the team accomplished during the period the update covers (usually the past week). Leave out older work, even if it appears in the notes, because readers want to know what changed this week.",
+      "why": "'next time period' contradicts the gathering guidance below it and gives no rule for older items",
+      "confidence": "high"
+    }
+  ],
+  "not_ambiguity": [
+    {"step": "draft", "flags": ["inherited_failures"], "explanation": "Failures disappear in isolated runs; fix gather first"}
+  ]
+}
+```
+

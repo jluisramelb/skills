@@ -272,3 +272,75 @@ Save notes to `{output_path}` as a JSON array of strings:
 - Make subjective quality judgments ("the output was good/bad")
 - Speculate about causes without evidence
 - Repeat information already in the run_summary aggregates
+
+---
+
+# Ambiguity Pass (step-level evals)
+
+When a benchmark has a `step_summary` (from `scripts/run_step_eval.py`), the analyzer also finds the **exact sentences in the skill that models read differently**. Small ambiguities are the most common reason a step drifts across runs or works for one model but not another. Fixing the sentence usually beats adding rules.
+
+## Role
+
+For each flagged step, work out whether the skill's wording is the cause. If it is, point to the sentence, show how each model read it, and suggest a sharper rewrite that also explains why. Unlike the benchmark notes above, this pass *does* suggest changes, but only to the flagged sentences.
+
+## Inputs
+
+You receive these parameters in your prompt:
+
+- **benchmark_data_path**: Path to benchmark.json (with `step_summary`)
+- **skill_path**: Path to the skill being evaluated
+- **workspace_path**: The iteration directory (holds `eval-*/<model>/run-*/outputs/steps/` and `logs/`)
+- **output_path**: Where to save the findings (ambiguity.json)
+
+## Process
+
+### Step 1: Pick the steps to examine
+
+Read `step_summary.flags`. Prioritize, in order:
+1. `model_gap`: one model gets it right and another doesn't. The stronger model is often filling in intent the text doesn't state
+2. `inconsistent` and `unstable_output` on probabilistic steps: the same model reads the instruction differently from run to run
+3. `always_fails`: the instruction may be missing, contradictory, or unreachable
+
+Skip steps whose failures are mostly **inherited** (`failure_attribution.inherited_failure_rate` ≥ own, or failures that disappear in isolated runs). Fix the upstream step first, and record the skipped step under `not_ambiguity`. Also skip `nondeterministic` deterministic steps; that's a script bug, not ambiguous wording.
+
+### Step 2: Read the instruction the step comes from
+
+Find the step's `source_section` in `evals/steps.json`, then read that section of SKILL.md (or the referenced file) word for word. Also read any section it points to.
+
+### Step 3: Compare the differing artifacts
+
+Open the artifacts for the flagged cell side by side (`outputs/steps/<NN>-<step>.*` across runs and models). For JSON steps, start with the fields with low `field_agreement`. Group the runs by how they behave, not by model: two or three distinct "readings" usually emerge. Check `logs/<NN>-<step>.json` for reasoning in the response that reveals which words the model leaned on.
+
+### Step 4: Find the sentence
+
+For each reading, find the sentence that supports it. An ambiguity is confirmed when **one sentence can reasonably be read both ways**, or two sentences contradict each other. Typical culprits:
+- Relative words with no anchor: "recent", "short", "the next time period", "important"
+- Rules without a reason, so the model can't tell when they apply
+- Format described in prose while the example shows something else
+- Instructions that conflict with examples or with another section
+- Missing cases: the instruction covers X and Y, the eval needs Z
+
+If no sentence explains the split (e.g. the model ignores a clear instruction), say so. That points to emphasis or placement, not wording.
+
+### Step 5: Suggest a rewrite
+
+Rewrite only the ambiguous sentence(s):
+- Make the intended reading the only reasonable one
+- Explain *why*, so the model can generalize (see "Improving the skill" in SKILL.md). Prefer that over adding MUSTs
+- Keep it general: it should fix the class of inputs, not just this eval
+
+### Step 6: Write findings
+
+Save to `{output_path}` using the `ambiguity.json` schema in `references/schemas.md`: one finding per ambiguous passage with the step, flags, source section, the exact `ambiguous_text`, each reading (with configs and example run paths), evidence, `suggested_rewrite`, `why`, and `confidence`. Put flagged steps you ruled out under `not_ambiguity` with a one-line explanation.
+
+## Guidelines
+
+**DO:**
+- Quote the skill's text exactly, so the edit can be made with search-and-replace
+- Base every reading on artifacts you actually opened, and cite run paths
+- Prefer one precise rewrite over several speculative ones
+
+**DO NOT:**
+- Propose rewrites for steps whose failures are inherited
+- Rewrite whole sections; the loop works best when only flagged sentences change between iterations
+- Treat a weak or wrong assertion as skill ambiguity. If the golden artifact or the check itself is debatable, say so in `not_ambiguity`

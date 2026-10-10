@@ -107,6 +107,18 @@ class RunAndGradeTests(unittest.TestCase):
         self.assertEqual((fun["passed"], fun["evidence"]), (False, "not delightful"))
         self.assertEqual(grading["steps"]["write"]["failure_origin"], "own")
 
+    def test_manual_llm_verdicts_survive_regrading(self):
+        skill = make_skill(self.root)
+        run_dir = self.run_chain(skill, scripted_executor({}))
+        grading = json.loads((run_dir / "grading.json").read_text())
+        for a in grading["steps"]["write"]["assertions"]:
+            if a["id"] == "fun":
+                a["passed"], a["evidence"] = True, "made me smile"
+        (run_dir / "grading.json").write_text(json.dumps(grading))
+        regraded = grade_run(run_dir)
+        self.assertEqual(regraded["steps"]["write"]["pending"], 0)
+        self.assertIn({"text": "[write] Is fun", "passed": True, "evidence": "made me smile"}, regraded["expectations"])
+
     def test_deterministic_step_cached(self):
         skill = make_skill(self.root)
         first = self.run_chain(skill, scripted_executor({}), run_number=1)

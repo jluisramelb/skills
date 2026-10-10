@@ -12,6 +12,10 @@ field carries the per-step detail.
 
 Usage:
     python -m scripts.grade_steps <run_dir> [--skill-path PATH] [--grader-model MODEL]
+
+Without --grader-model, LLM-graded checks stay pending (`passed: null`).
+Verdicts filled into grading.json by hand or by the grader agent are kept
+when regrading, so rerun this script afterwards to update the summaries.
 """
 
 import argparse
@@ -208,6 +212,7 @@ def grade_step(
     context: str,
     llm_grader: LLMGrader | None,
     step_log: dict | None = None,
+    previous_llm: dict | None = None,
 ) -> dict:
     fmt = step_format(step)
     results: list[dict] = []
@@ -245,7 +250,11 @@ def grade_step(
                 "critical": bool(a.get("critical", False)),
             }
             if entry["kind"] == "llm":
-                if llm_grader is None:
+                kept = (previous_llm or {}).get(entry["id"])
+                if llm_grader is None and kept and kept.get("passed") is not None:
+                    # Keep verdicts filled in earlier (e.g. by the grader agent)
+                    entry["passed"], entry["evidence"] = bool(kept["passed"]), kept.get("evidence", "")
+                elif llm_grader is None:
                     entry["passed"] = None
                     entry["evidence"] = "Pending LLM grading (run with --grader-model or grade with agents/grader.md)"
                 else:
@@ -299,6 +308,15 @@ def grade_run(
 
     step_assertions = eval_item.get("step_assertions", {})
     context = f"User request: {eval_item.get('prompt', '')}"
+
+    previous: dict = {}
+    grading_path = run_dir / "grading.json"
+    if grading_path.exists():
+        try:
+            for psid, pstep in json.loads(grading_path.read_text()).get("steps", {}).items():
+                previous[psid] = {a.get("id"): a for a in pstep.get("assertions", []) if a.get("kind") == "llm"}
+        except (json.JSONDecodeError, AttributeError):
+            previous = {}
     graded: dict[str, dict] = {}
     for sid in to_grade:
         step = by_id[sid]
@@ -311,7 +329,7 @@ def grade_run(
                 step_log = None
         graded[sid] = grade_step(
             step, run_dir / STEPS_SUBDIR / step["output"], step_assertions.get(sid, []),
-            skill_path, context, llm_grader, step_log,
+            skill_path, context, llm_grader, step_log, previous.get(sid),
         )
         if mode == "isolated":
             graded[sid]["inputs_source"] = "golden"
