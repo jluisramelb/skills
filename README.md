@@ -89,16 +89,19 @@ The frontmatter requires only two fields:
 
 The markdown content below contains the instructions, examples, and guidelines that Claude will follow. For more details, see [How to create custom skills](https://support.claude.com/en/articles/12512198-creating-custom-skills).
 
-## Evaluating a Skill
+## Creating and Evaluating Skills with Copilot CLI
 
-The [skill-creator](./skills/skill-creator) skill includes an evaluation loop: test prompts, graded assertions, with/without-skill benchmarks and a review viewer. For multi-step skills it also supports optional **step-level evaluation**:
+[skill-creator](./skills/skill-creator) is a meta skill for [GitHub Copilot CLI](https://docs.github.com/en/copilot/how-tos/copilot-cli/customize-copilot/add-skills). It helps you write a skill, then test it with evals across models:
+- It maps a skill's workflow into probabilistic, deterministic and human steps (optional `evals/steps.json`), with one checked artifact per step.
+- It runs each eval N times per model through `copilot -p`, against a no-skill or old-version baseline.
+- It reports where failures start and spread, and finds the exact sentences models read differently.
 
-- Map the workflow into steps typed as probabilistic, deterministic or human-in-the-loop, in `evals/steps.json`.
-- Have each step write its own artifact, and check each artifact with programmatic, reference or LLM-graded checks.
-- Run every step several times on several models, and compare full-chain runs with isolated runs (golden inputs) to see where failures start and how they propagate.
-- Use the analyzer's ambiguity pass to find the sentences that models read differently.
+To use it:
+1. Copy `skills/skill-creator` into `~/.copilot/skills/` (personal) or your repository's `.github/skills/` (project).
+2. Run `/skills reload` in Copilot CLI.
+3. Ask Copilot to create or improve a skill.
 
-See [skills/skill-creator/references/step-level-evals.md](./skills/skill-creator/references/step-level-evals.md). For a worked example, see [skills/internal-comms/evals](./skills/internal-comms/evals) (3P updates). Skills without a step manifest are evaluated exactly as before.
+See [references/evals.md](./skills/skill-creator/references/evals.md) for the eval formats, and [skills/internal-comms/evals](./skills/internal-comms/evals) for a worked step-level example (3P updates).
 
 # Partner Skills
 

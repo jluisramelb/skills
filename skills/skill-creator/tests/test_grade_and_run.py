@@ -3,8 +3,8 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from scripts.grade_steps import grade_run, run_check
-from scripts.run_step_eval import extract_artifact, plan_jobs, run_job
+from scripts.grade import grade_run, run_check
+from scripts.run_evals import copilot_command, extract_artifact, plan_jobs, run_job
 from tests.fixtures import make_skill, scripted_executor
 
 
@@ -70,7 +70,7 @@ class RunAndGradeTests(unittest.TestCase):
         self.assertTrue((run_dir / "logs" / "02-approve.json").exists())
         self.assertIn("replayed_fixture", json.loads((run_dir / "logs" / "02-approve.json").read_text()))
         timing = json.loads((run_dir / "timing.json").read_text())
-        self.assertEqual(timing["total_tokens"], 20)
+        self.assertGreaterEqual(timing["duration_ms"], 2000)  # two probabilistic steps x 1000ms + the script
 
     def test_critical_failure_contaminates_downstream(self):
         skill = make_skill(self.root)
@@ -88,8 +88,8 @@ class RunAndGradeTests(unittest.TestCase):
     def test_missing_artifact_skips_downstream(self):
         skill = make_skill(self.root)
 
-        def broken(prompt, model, cwd, skill_path, timeout):
-            return {"text": "I could not do it", "duration_ms": 0, "tokens": 0, "is_error": False}
+        def broken(prompt, model, cwd, extra_dir, timeout, tools="read"):
+            return {"text": "I could not do it", "duration_ms": 0, "is_error": False}
 
         run_dir = self.run_chain(skill, broken)
         steps = json.loads((run_dir / "grading.json").read_text())["steps"]
@@ -102,7 +102,7 @@ class RunAndGradeTests(unittest.TestCase):
     def test_llm_grader_is_used(self):
         skill = make_skill(self.root)
         run_dir = self.run_chain(skill, scripted_executor({}))
-        grading = grade_run(run_dir, None, lambda rubric, text, ctx: (False, "not delightful"))
+        grading = grade_run(run_dir, None, lambda rubric, text, ctx, outputs_dir: (False, "not delightful"))
         fun = [a for a in grading["steps"]["write"]["assertions"] if a["id"] == "fun"][0]
         self.assertEqual((fun["passed"], fun["evidence"]), (False, "not delightful"))
         self.assertEqual(grading["steps"]["write"]["failure_origin"], "own")
@@ -154,6 +154,49 @@ class RunAndGradeTests(unittest.TestCase):
         self.assertEqual(list(grading["steps"]), ["write"])
         self.assertEqual(grading["steps"]["write"]["inputs_source"], "golden")
         self.assertFalse(grading["steps"]["write"]["contaminated"])
+
+
+    def test_skill_without_manifest_runs_as_one_step_with_expectations(self):
+        skill = make_skill(self.root, evals_data={"evals": [
+            {"id": 1, "name": "otters", "prompt": "Write about otters.", "expectations": ["Mentions otters"]},
+        ]})
+        (skill / "evals" / "steps.json").unlink()
+        calls = []
+
+        def executor(prompt, model, cwd, extra_dir, timeout, tools="read"):
+            calls.append(tools)
+            return {"text": "<artifact>\nOtters are great.\n</artifact>", "duration_ms": 5, "is_error": False}
+
+        run_dir = self.run_chain(skill, executor)
+        self.assertEqual(calls, ["all"])
+        self.assertEqual((run_dir / "outputs/steps/01-result.md").read_text(), "Otters are great.\n")
+        seen = []
+        grading = grade_run(run_dir, None, lambda rubric, text, ctx, out: (seen.append(out) or True, "says otters"))
+        self.assertEqual(seen, [run_dir / "outputs"])
+        self.assertIn({"text": "[result] Mentions otters", "passed": True, "evidence": "says otters"},
+                      grading["expectations"])
+
+    def test_no_skill_baseline_prompt_omits_skill(self):
+        skill = make_skill(self.root)
+        prompts = []
+
+        def executor(prompt, model, cwd, extra_dir, timeout, tools="read"):
+            prompts.append(prompt)
+            return scripted_executor({})(prompt, model, cwd, extra_dir, timeout, tools)
+
+        jobs = plan_jobs(skill, self.root / "ws", ["m"], 1, None, [], "no_skill", 60, use_skill=False)
+        run_job(jobs[0], executor)
+        self.assertTrue(jobs[0]["run_dir"].endswith("m__no_skill/run-1"))
+        self.assertTrue(prompts)
+        self.assertFalse(any("SKILL.md" in p for p in prompts))
+
+    def test_copilot_command_denies_shell_and_writes_for_read_steps(self):
+        read = copilot_command("hi", "gpt-x", Path("/s"), "read")
+        self.assertEqual(read[:3], ["copilot", "-p", "hi"])
+        self.assertIn("--model=gpt-x", read)
+        self.assertIn("--add-dir=/s", read)
+        self.assertEqual(read[-2:], ["--deny-tool=shell", "--deny-tool=write"])
+        self.assertNotIn("--deny-tool=shell", copilot_command("hi", "gpt-x", Path("/s"), "all"))
 
 
 if __name__ == "__main__":

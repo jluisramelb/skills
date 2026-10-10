@@ -104,8 +104,8 @@ def make_skill(root: Path, manifest_data: dict | None = None, evals_data: dict |
 
 
 def scripted_executor(outputs_by_model: dict[str, dict[str, str]]):
-    """Fake `claude -p`: returns a canned artifact per (model, output file)."""
-    def run(prompt, model, cwd, skill_path, timeout):
+    """Fake `copilot -p`: returns a canned artifact per (model, output file)."""
+    def run(prompt, model, cwd, extra_dir, timeout, tools="read"):
         output = re.search(r"OUTPUT_FILE: (\S+)", prompt).group(1)
         content = outputs_by_model.get(model, {}).get(output)
         if isinstance(content, list):  # vary by run number (cwd is .../run-R)
@@ -113,6 +113,6 @@ def scripted_executor(outputs_by_model: dict[str, dict[str, str]]):
             content = content[(run_number - 1) % len(content)]
         if content is None:
             content = GOLDEN[output] if isinstance(GOLDEN[output], str) else json.dumps(GOLDEN[output])
-        return {"text": f"Sure.\n<artifact>\n{content}\n</artifact>", "duration_ms": 1000, "tokens": 10,
+        return {"text": f"Sure.\n<artifact>\n{content}\n</artifact>", "duration_ms": 1000,
                 "is_error": False}
     return run

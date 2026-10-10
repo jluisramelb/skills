@@ -1,21 +1,17 @@
 #!/usr/bin/env python3
-"""Grade the per-step artifacts of a step-level eval run.
+"""Grade one eval run and write its grading.json.
 
 Reads `run_meta.json` and `outputs/steps/*` from a run directory, applies
-each step's assertions (programmatic, then reference, then LLM-graded),
-marks steps downstream of a failed critical check as "contaminated", and
-writes `grading.json`.
-
-The flattened `expectations` / `summary` fields keep grading.json
-compatible with aggregate_benchmark.py and the eval viewer; the `steps`
-field carries the per-step detail.
+each step's checks (programmatic, then reference, then LLM-graded), adds
+the eval's end-to-end `expectations` as LLM checks on the final step, and
+marks steps downstream of a failed critical check as "contaminated".
 
 Usage:
-    python -m scripts.grade_steps <run_dir> [--skill-path PATH] [--grader-model MODEL]
+    python -m scripts.grade <run_dir>... [--skill-path PATH] [--grader-model MODEL]
 
 Without --grader-model, LLM-graded checks stay pending (`passed: null`).
-Verdicts filled into grading.json by hand or by the grader agent are kept
-when regrading, so rerun this script afterwards to update the summaries.
+Verdicts you fill into grading.json yourself are kept when regrading, so
+rerun this script afterwards to update the summaries.
 """
 
 import argparse
@@ -27,16 +23,16 @@ from pathlib import Path
 from typing import Callable
 
 try:
-    from scripts.step_manifest import (
-        load_evals, load_manifest, step_format, steps_by_id, topological_order, upstream,
+    from scripts.manifest import (
+        effective_manifest, final_step, load_evals, step_format, steps_by_id, topological_order, upstream,
     )
 except ImportError:
-    from step_manifest import (
-        load_evals, load_manifest, step_format, steps_by_id, topological_order, upstream,
+    from manifest import (
+        effective_manifest, final_step, load_evals, step_format, steps_by_id, topological_order, upstream,
     )
 
-# (rubric, artifact_text, context) -> (passed, evidence)
-LLMGrader = Callable[[str, str, str], tuple[bool, str]]
+# (rubric, artifact_text, context, outputs_dir) -> (passed, evidence)
+LLMGrader = Callable[[str, str, str, Path], tuple[bool, str]]
 
 STEPS_SUBDIR = Path("outputs") / "steps"
 
@@ -256,10 +252,10 @@ def grade_step(
                     entry["passed"], entry["evidence"] = bool(kept["passed"]), kept.get("evidence", "")
                 elif llm_grader is None:
                     entry["passed"] = None
-                    entry["evidence"] = "Pending LLM grading (run with --grader-model or grade with agents/grader.md)"
+                    entry["evidence"] = "Pending: rerun with --grader-model, or fill in passed/evidence by hand"
                 else:
                     try:
-                        entry["passed"], entry["evidence"] = llm_grader(a["rubric"], text, context)
+                        entry["passed"], entry["evidence"] = llm_grader(a["rubric"], text, context, artifact_path.parent.parent)
                     except Exception as e:  # grading failures shouldn't sink the run
                         entry["passed"], entry["evidence"] = None, f"LLM grading failed: {e}"
             else:
@@ -289,13 +285,11 @@ def grade_run(
     skill_path: Path | None = None,
     llm_grader: LLMGrader | None = None,
 ) -> dict:
-    """Grade a run directory produced by run_step_eval.py and write grading.json."""
+    """Grade a run directory produced by run_evals.py and write grading.json."""
     run_dir = Path(run_dir)
     meta = json.loads((run_dir / "run_meta.json").read_text())
     skill_path = Path(skill_path or meta["skill_path"])
-    manifest = load_manifest(skill_path)
-    if manifest is None:
-        raise FileNotFoundError(f"No evals/steps.json in {skill_path}")
+    manifest = effective_manifest(skill_path)
     evals = load_evals(skill_path) or {"evals": []}
     eval_item = next((e for e in evals.get("evals", []) if e.get("id") == meta["eval_id"]), {})
 
@@ -306,8 +300,13 @@ def grade_run(
     isolated_step = meta.get("isolated_step")
     to_grade = [isolated_step] if mode == "isolated" else order
 
-    step_assertions = eval_item.get("step_assertions", {})
-    context = f"User request: {eval_item.get('prompt', '')}"
+    step_assertions = {sid: list(a) for sid, a in eval_item.get("step_assertions", {}).items()}
+    last = final_step(manifest)
+    for i, text in enumerate(eval_item.get("expectations", []), start=1):
+        step_assertions.setdefault(last, []).append(
+            {"id": f"expectation-{i}", "text": text, "kind": "llm", "rubric": text})
+    context = (f"User request: {eval_item.get('prompt', '')}\n"
+               f"Files the run created, if any, are under {run_dir / 'outputs'}")
 
     previous: dict = {}
     grading_path = run_dir / "grading.json"
@@ -390,9 +389,9 @@ def main() -> None:
     llm_grader = None
     if args.grader_model:
         try:
-            from scripts.run_step_eval import make_llm_grader
+            from scripts.run_evals import make_llm_grader
         except ImportError:
-            from run_step_eval import make_llm_grader
+            from run_evals import make_llm_grader
         llm_grader = make_llm_grader(args.grader_model, args.timeout)
 
     for run_dir in args.run_dirs:

@@ -1,12 +1,13 @@
 #!/usr/bin/env python3
-"""Run step-level evals for a skill across several models, N times each.
+"""Run a skill's evals across several models, N times each, with Copilot CLI.
 
-Each probabilistic step is executed as its own `claude -p --model <model>`
-call that reads SKILL.md, the user's request and the upstream step
-artifacts, and returns exactly one artifact. Human steps replay a recorded
-decision (fixture). Deterministic steps are executed by this harness from
-the manifest's `command`, cached by input hash, and run twice on a cache
-miss to confirm they're reproducible.
+Every skill is a chain of typed steps (evals/steps.json, or one implicit
+step that does the whole task). Each probabilistic step is its own
+`copilot -p --model <model>` call that reads SKILL.md, the user's request
+and the upstream step artifacts, and returns exactly one artifact. Human
+steps replay a recorded decision. Deterministic steps run the manifest's
+`command` here, cached by input hash, and run twice on a cache miss to
+confirm they're reproducible. Each run is graded right away (grade.py).
 
 Layout written under --workspace (an iteration directory):
 
@@ -26,9 +27,10 @@ artifacts. Comparing it with the full chain separates a step's own
 failures from failures inherited from earlier steps.
 
 Usage:
-    python -m scripts.run_step_eval --skill-path <skill> --workspace <ws>/iteration-1 \\
-        --models claude-sonnet-5 claude-opus-5 --runs 5 [--isolate all] [--grader-model M]
-    python -m scripts.run_step_eval ... --dry-run   # replay golden artifacts, no model calls
+    python -m scripts.run_evals --skill-path <skill> --workspace <ws>/iteration-1 \\
+        --models <everyday-model> <strongest-model> --runs 5 [--isolate all] [--grader-model M]
+    python -m scripts.run_evals ... --no-skill      # baseline: same prompts without the skill
+    python -m scripts.run_evals ... --dry-run       # replay golden artifacts, no model calls
 """
 
 import argparse
@@ -39,29 +41,28 @@ import re
 import shutil
 import subprocess
 import sys
-import tempfile
 import time
 from concurrent.futures import ProcessPoolExecutor, as_completed
 from pathlib import Path
 from typing import Callable
 
 try:
-    from scripts.grade_steps import STEPS_SUBDIR, grade_run
-    from scripts.step_manifest import (
-        golden_artifact, load_evals, load_manifest, resolve_fixture, step_format,
+    from scripts.grade import STEPS_SUBDIR, grade_run
+    from scripts.manifest import (
+        effective_manifest, golden_artifact, load_evals, resolve_fixture, step_format,
         steps_by_id, topological_order, upstream, validate_manifest,
     )
     from scripts.utils import parse_skill_md
 except ImportError:
-    from grade_steps import STEPS_SUBDIR, grade_run
-    from step_manifest import (
-        golden_artifact, load_evals, load_manifest, resolve_fixture, step_format,
+    from grade import STEPS_SUBDIR, grade_run
+    from manifest import (
+        effective_manifest, golden_artifact, load_evals, resolve_fixture, step_format,
         steps_by_id, topological_order, upstream, validate_manifest,
     )
     from utils import parse_skill_md
 
-# (prompt, model, cwd, skill_path, timeout) -> {"text", "duration_ms", "tokens", "is_error"}
-Executor = Callable[[str, str, Path, Path, int], dict]
+# (prompt, model, cwd, extra_dir, timeout, tools) -> {"text", "duration_ms", "is_error", "error"}
+Executor = Callable[[str, str, Path, Path, int, str], dict]
 
 ARTIFACT_RE = re.compile(r"<artifact>\s*\n?(.*?)\n?\s*</artifact>", re.DOTALL)
 FENCE_RE = re.compile(r"^```[a-zA-Z]*\n(.*)\n```$", re.DOTALL)
@@ -85,58 +86,56 @@ def eval_dir_name(item: dict) -> str:
 # Executors
 # ---------------------------------------------------------------------------
 
-def claude_executor(prompt: str, model: str, cwd: Path, skill_path: Path, timeout: int) -> dict:
-    """Run one step with `claude -p` and return its text result and usage."""
+def copilot_command(prompt: str, model: str, extra_dir: Path, tools: str) -> list[str]:
+    """The `copilot -p` call for one step.
+
+    Non-interactive mode needs --allow-all-tools; with tools="read" the
+    shell and file writes are denied (deny rules win over allow rules).
+    """
     cmd = [
-        "claude", "-p", prompt,
-        "--model", model,
-        "--output-format", "json",
-        "--add-dir", str(skill_path),
-        "--allowedTools", "Read", "Glob", "Grep",
+        "copilot", "-p", prompt, f"--model={model}", "--silent", "--no-ask-user",
+        "--no-custom-instructions", "--no-color", f"--add-dir={extra_dir}", "--allow-all-tools",
     ]
-    # Allow nesting inside a Claude Code session (see run_eval.py).
-    env = {k: v for k, v in os.environ.items() if k != "CLAUDECODE"}
+    if tools == "read":
+        cmd += ["--deny-tool=shell", "--deny-tool=write"]
+    return cmd
+
+
+def copilot_executor(prompt: str, model: str, cwd: Path, extra_dir: Path, timeout: int, tools: str = "read") -> dict:
+    """Run one step with Copilot CLI and return its text response."""
     start = time.time()
     try:
-        proc = subprocess.run(cmd, cwd=cwd, env=env, capture_output=True, text=True, timeout=timeout)
+        proc = subprocess.run(copilot_command(prompt, model, extra_dir, tools), cwd=cwd,
+                              capture_output=True, text=True, timeout=timeout)
+    except FileNotFoundError:
+        return {"text": "", "duration_ms": 0, "is_error": True,
+                "error": "copilot not found; install GitHub Copilot CLI and run `copilot login`"}
     except subprocess.TimeoutExpired:
-        return {"text": "", "duration_ms": int((time.time() - start) * 1000), "tokens": 0,
+        return {"text": "", "duration_ms": int((time.time() - start) * 1000),
                 "is_error": True, "error": f"Timed out after {timeout}s"}
-    elapsed_ms = int((time.time() - start) * 1000)
-    try:
-        data = json.loads(proc.stdout)
-    except json.JSONDecodeError:
-        return {"text": proc.stdout, "duration_ms": elapsed_ms, "tokens": 0, "is_error": True,
-                "error": (proc.stderr or "Non-JSON output from claude -p").strip()[:2000]}
-    usage = data.get("usage") or {}
-    tokens = sum(int(usage.get(k) or 0) for k in (
-        "input_tokens", "output_tokens", "cache_creation_input_tokens", "cache_read_input_tokens",
-    ))
     return {
-        "text": data.get("result", ""),
-        "duration_ms": int(data.get("duration_ms") or elapsed_ms),
-        "tokens": tokens,
-        "is_error": bool(data.get("is_error")) or proc.returncode != 0,
+        "text": proc.stdout,
+        "duration_ms": int((time.time() - start) * 1000),
+        "is_error": proc.returncode != 0,
         "error": proc.stderr.strip()[:2000] if proc.returncode != 0 else None,
     }
 
 
 def make_llm_grader(model: str, timeout: int = 120, executor: Executor | None = None):
-    """Build an LLM grader for `kind: llm` assertions using `claude -p`."""
-    run = executor or claude_executor
+    """Build an LLM grader for `kind: llm` checks. It can read the run's outputs, nothing else."""
+    run = executor or copilot_executor
 
-    def grade(rubric: str, artifact_text: str, context: str) -> tuple[bool, str]:
+    def grade(rubric: str, artifact_text: str, context: str, outputs_dir: Path) -> tuple[bool, str]:
         prompt = (
-            "You are grading one artifact from a step-level skill evaluation.\n\n"
+            "You are grading one artifact from a skill evaluation.\n\n"
             f"{context}\n\n"
             f"<artifact>\n{artifact_text}\n</artifact>\n\n"
             f"Rubric: {rubric}\n\n"
-            "Decide whether the artifact satisfies the rubric. Be strict: a pass needs concrete evidence "
-            "in the artifact, not just surface compliance. Respond with only a JSON object: "
+            "Decide whether the artifact (and any files it refers to) satisfies the rubric. Be strict: "
+            "a pass needs concrete evidence, not just surface compliance. Respond with only a JSON object: "
             '{"passed": true|false, "evidence": "<quote or short explanation>"}'
         )
-        with tempfile.TemporaryDirectory() as tmp:
-            result = run(prompt, model, Path(tmp), Path(tmp), timeout)
+        result = run(prompt, model, outputs_dir, outputs_dir, timeout, "read")
         if result.get("is_error"):
             raise RuntimeError(result.get("error") or "grader call failed")
         text = result.get("text", "")
@@ -151,12 +150,12 @@ def make_llm_grader(model: str, timeout: int = 120, executor: Executor | None = 
 
 def make_golden_executor(golden_by_output: dict[str, str]) -> Executor:
     """Executor for --dry-run: returns the golden artifact named in the prompt."""
-    def run(prompt: str, model: str, cwd: Path, skill_path: Path, timeout: int) -> dict:
+    def run(prompt: str, model: str, cwd: Path, extra_dir: Path, timeout: int, tools: str = "read") -> dict:
         match = re.search(r"OUTPUT_FILE: (\S+)", prompt)
         content = golden_by_output.get(match.group(1)) if match else None
         if content is None:
-            return {"text": "", "duration_ms": 0, "tokens": 0, "is_error": True, "error": "no golden artifact"}
-        return {"text": f"<artifact>\n{content}\n</artifact>", "duration_ms": 0, "tokens": 0, "is_error": False}
+            return {"text": "", "duration_ms": 0, "is_error": True, "error": "no golden artifact"}
+        return {"text": f"<artifact>\n{content}\n</artifact>", "duration_ms": 0, "is_error": False}
     return run
 
 
@@ -166,14 +165,25 @@ def make_golden_executor(golden_by_output: dict[str, str]) -> Executor:
 
 def build_step_prompt(
     skill_name: str, skill_path: Path, step: dict, eval_item: dict, input_paths: dict[str, Path],
+    use_skill: bool = True,
 ) -> str:
     fmt = step_format(step)
-    lines = [
-        f'You are executing ONE step of the "{skill_name}" skill as part of a step-level evaluation.',
-        "",
-        f"1. Read the skill instructions at {skill_path / 'SKILL.md'} (and any files it points you to).",
-        "2. Read the user's request and the input artifacts below.",
-        f"3. Perform ONLY the step \"{step['id']}\" and stop. Don't perform later steps.",
+    if use_skill:
+        lines = [
+            f'You are executing ONE step of the "{skill_name}" skill as part of an evaluation.',
+            "",
+            f"1. Read the skill instructions at {skill_path / 'SKILL.md'} (and any files it points you to).",
+            "2. Read the user's request and the input artifacts below.",
+            f"3. Perform ONLY the step \"{step['id']}\" and stop. Don't perform later steps.",
+        ]
+    else:  # baseline: same task and step, no skill instructions
+        lines = [
+            "You are executing ONE step of a task as part of an evaluation.",
+            "",
+            "1. Read the user's request and the input artifacts below.",
+            f"2. Perform ONLY the step \"{step['id']}\" and stop. Don't perform later steps.",
+        ]
+    lines += [
         "",
         "<user_request>",
         eval_item.get("prompt", ""),
@@ -185,8 +195,9 @@ def build_step_prompt(
     lines += [
         "",
         f"STEP: {step['id']} ({step['type']})",
-        f"SKILL.md SECTION: {step.get('source_section', '(not specified)')}",
     ]
+    if use_skill:
+        lines.append(f"SKILL.md SECTION: {step.get('source_section', '(not specified)')}")
     if step.get("description"):
         lines.append(f"WHAT THIS STEP DOES: {step['description']}")
     if input_paths:
@@ -290,10 +301,10 @@ def run_deterministic(
 
 def run_job(job: dict, executor: Executor | None = None, llm_grader=None) -> dict:
     """Execute one chain or isolated run, then grade it. Returns a summary."""
-    executor = executor or claude_executor
+    executor = executor or copilot_executor
     skill_path = Path(job["skill_path"])
     run_dir = Path(job["run_dir"])
-    manifest = load_manifest(skill_path)
+    manifest = effective_manifest(skill_path)
     evals = load_evals(skill_path) or {"evals": []}
     eval_item = next(e for e in evals["evals"] if e["id"] == job["eval_id"])
     skill_name, _, _ = parse_skill_md(skill_path)
@@ -314,6 +325,7 @@ def run_job(job: dict, executor: Executor | None = None, llm_grader=None) -> dic
         "eval_id": job["eval_id"],
         "model": job["model"],
         "label": job.get("label"),
+        "use_skill": job.get("use_skill", True),
         "run_number": job["run_number"],
         "mode": mode,
         "isolated_step": target,
@@ -333,7 +345,6 @@ def run_job(job: dict, executor: Executor | None = None, llm_grader=None) -> dic
         to_run = topological_order(steps)
 
     total_ms = 0
-    total_tokens = 0
     for sid in to_run:
         step = by_id[sid]
         output = steps_dir / step["output"]
@@ -354,18 +365,17 @@ def run_job(job: dict, executor: Executor | None = None, llm_grader=None) -> dic
             log.update(run_deterministic(step, skill_path, input_paths, output, cache_dir, job["timeout"]))
             total_ms += log.get("duration_ms", 0)
         else:
-            prompt = build_step_prompt(skill_name, skill_path, step, eval_item, input_paths)
-            result = executor(prompt, job["model"], run_dir, skill_path, job["timeout"])
+            prompt = build_step_prompt(skill_name, skill_path, step, eval_item, input_paths,
+                                       job.get("use_skill", True))
+            result = executor(prompt, job["model"], run_dir, skill_path, job["timeout"], step.get("tools", "read"))
             artifact = extract_artifact(result.get("text", ""), step_format(step))
             if artifact is not None:
                 output.write_text(artifact)
             total_ms += int(result.get("duration_ms") or 0)
-            total_tokens += int(result.get("tokens") or 0)
             log.update({
                 "prompt": prompt,
                 "response": result.get("text", ""),
                 "duration_ms": result.get("duration_ms"),
-                "tokens": result.get("tokens"),
                 "is_error": result.get("is_error", False),
                 "error": result.get("error"),
                 "artifact_found": artifact is not None,
@@ -373,7 +383,6 @@ def run_job(job: dict, executor: Executor | None = None, llm_grader=None) -> dic
         (logs_dir / f"{Path(step['output']).stem}.json").write_text(json.dumps(log, indent=2))
 
     (run_dir / "timing.json").write_text(json.dumps({
-        "total_tokens": total_tokens,
         "duration_ms": total_ms,
         "total_duration_seconds": round(total_ms / 1000, 1),
     }, indent=2))
@@ -388,9 +397,9 @@ def run_job(job: dict, executor: Executor | None = None, llm_grader=None) -> dic
 
 def plan_jobs(
     skill_path: Path, workspace: Path, models: list[str], runs: int, eval_ids: list[int] | None,
-    isolate: list[str], label: str | None, timeout: int, use_cache: bool = True,
+    isolate: list[str], label: str | None, timeout: int, use_cache: bool = True, use_skill: bool = True,
 ) -> list[dict]:
-    manifest = load_manifest(skill_path)
+    manifest = effective_manifest(skill_path)
     evals = load_evals(skill_path) or {"evals": []}
     by_id = steps_by_id(manifest)
     if isolate == ["all"]:
@@ -412,7 +421,7 @@ def plan_jobs(
             "eval_id": item["id"],
             "eval_name": item.get("name") or eval_dir.name,
             "prompt": item.get("prompt", ""),
-            "assertions": item.get("expectations", []),
+            "expectations": item.get("expectations", []),
             "step_assertions": item.get("step_assertions", {}),
         }, indent=2))
         isolatable = []
@@ -427,7 +436,7 @@ def plan_jobs(
         for model in models:
             config_dir = eval_dir / config_dir_name(model, label)
             base = {"skill_path": str(skill_path), "eval_id": item["id"], "model": model, "label": label,
-                    "timeout": timeout, "cache_dir": cache_dir}
+                    "use_skill": use_skill, "timeout": timeout, "cache_dir": cache_dir}
             for r in range(1, runs + 1):
                 jobs.append({**base, "mode": "chain", "run_number": r, "run_dir": str(config_dir / f"run-{r}")})
                 for sid in isolatable:
@@ -440,7 +449,7 @@ def _run_job_worker(job: dict, grader_model: str | None, grader_timeout: int, dr
     executor = None
     if dry_run:
         skill_path = Path(job["skill_path"])
-        manifest = load_manifest(skill_path)
+        manifest = effective_manifest(skill_path)
         item = next(e for e in load_evals(skill_path)["evals"] if e["id"] == job["eval_id"])
         golden = {}
         for step in manifest["steps"]:
@@ -472,7 +481,7 @@ def run_matrix(
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(description="Run step-level evals across models and repetitions")
+    parser = argparse.ArgumentParser(description="Run a skill's evals across models and repetitions with Copilot CLI")
     parser.add_argument("--skill-path", required=True, type=Path, help="Path to the skill directory")
     parser.add_argument("--workspace", required=True, type=Path, help="Iteration directory to write results to")
     parser.add_argument("--models", nargs="+", required=True, help="Models to run (e.g. your everyday and your strongest model)")
@@ -480,6 +489,7 @@ def main() -> None:
     parser.add_argument("--evals", nargs="+", type=int, default=None, help="Eval ids to run (default: all)")
     parser.add_argument("--isolate", nargs="+", default=[], help="Also run these steps in isolation from golden inputs ('all' = every probabilistic step)")
     parser.add_argument("--label", default=None, help="Config suffix, e.g. 'old_skill' when --skill-path is a snapshot")
+    parser.add_argument("--no-skill", action="store_true", help="Baseline: run the same steps without the skill's instructions (label defaults to 'no_skill')")
     parser.add_argument("--grader-model", default=None, help="Model for LLM-graded assertions (default: leave pending)")
     parser.add_argument("--num-workers", type=int, default=4, help="Parallel workers")
     parser.add_argument("--timeout", type=int, default=300, help="Timeout per step in seconds")
@@ -488,12 +498,13 @@ def main() -> None:
     args = parser.parse_args()
 
     skill_path = args.skill_path.resolve()
-    manifest = load_manifest(skill_path)
-    if manifest is None:
-        sys.exit(f"No evals/steps.json found in {skill_path}")
-    errors = validate_manifest(manifest, skill_path, load_evals(skill_path))
+    evals = load_evals(skill_path)
+    if not evals or not evals.get("evals"):
+        sys.exit(f"No evals found in {skill_path}/evals/evals.json")
+    errors = validate_manifest(effective_manifest(skill_path), skill_path, evals)
     if errors:
-        sys.exit("Invalid step manifest:\n  - " + "\n  - ".join(errors))
+        sys.exit("Invalid evals:\n  - " + "\n  - ".join(errors))
+    label = args.label or ("no_skill" if args.no_skill else None)
     if args.runs < 1:
         sys.exit("--runs must be >= 1")
 
@@ -501,7 +512,7 @@ def main() -> None:
     workspace.mkdir(parents=True, exist_ok=True)
     try:
         jobs = plan_jobs(skill_path, workspace, args.models, args.runs, args.evals, args.isolate,
-                         args.label, args.timeout, use_cache=not args.no_cache)
+                         label, args.timeout, use_cache=not args.no_cache, use_skill=not args.no_skill)
     except ValueError as e:
         sys.exit(str(e))
 

@@ -1,10 +1,13 @@
-"""Step manifest support for step-level skill evaluation.
+"""Step manifests: a skill's workflow as typed steps, one artifact each.
 
-A step manifest (`evals/steps.json` inside a skill) breaks the skill's
-workflow into typed steps. Each step writes exactly one artifact to
+`evals/steps.json` breaks a skill into probabilistic, deterministic and
+human steps. Each step writes one artifact to
 `outputs/steps/<NN>-<step-id>.<ext>` so it can be checked on its own.
 
-See references/schemas.md ("steps.json") for the full format.
+A skill without a manifest is one probabilistic step that does the whole
+task (IMPLICIT_MANIFEST), so every skill is evaluated the same way.
+
+See references/evals.md for the format.
 """
 
 import json
@@ -13,6 +16,7 @@ from pathlib import Path
 
 STEP_TYPES = {"probabilistic", "deterministic", "human"}
 STEP_FORMATS = {"json", "markdown", "text"}
+STEP_TOOLS = {"read", "all"}
 ASSERTION_KINDS = {"programmatic", "reference", "llm"}
 
 PROGRAMMATIC_CHECKS = {
@@ -35,6 +39,20 @@ REFERENCE_CHECKS = {
 MANIFEST_RELPATH = Path("evals") / "steps.json"
 EVALS_RELPATH = Path("evals") / "evals.json"
 
+IMPLICIT_MANIFEST = {
+    "steps": [{
+        "id": "result",
+        "type": "probabilistic",
+        "source_section": "(whole skill)",
+        "output": "01-result.md",
+        "tools": "all",
+        "description": (
+            "Carry out the user's request end to end. Save any files you create under outputs/. "
+            "In the artifact, give the final answer, or list the files you created with a short summary."
+        ),
+    }],
+}
+
 _STEP_ID_RE = re.compile(r"^[a-z0-9]+(-[a-z0-9]+)*$")
 _INPUT_PLACEHOLDER_RE = re.compile(r"\{input:([^}]+)\}")
 
@@ -45,6 +63,16 @@ def load_manifest(skill_path: Path) -> dict | None:
     if not path.exists():
         return None
     return json.loads(path.read_text())
+
+
+def effective_manifest(skill_path: Path) -> dict:
+    """The skill's manifest, or the one-step IMPLICIT_MANIFEST if it has none."""
+    return load_manifest(skill_path) or IMPLICIT_MANIFEST
+
+
+def final_step(manifest: dict) -> str:
+    """The last step in dependency order; end-to-end expectations grade it."""
+    return topological_order(manifest["steps"])[-1]
 
 
 def load_evals(skill_path: Path) -> dict | None:
@@ -233,6 +261,9 @@ def validate_manifest(manifest: dict, skill_path: Path, evals: dict | None = Non
         if schema is not None and not (isinstance(schema, dict) and isinstance(schema.get("required", []), list)):
             errors.append(f"{where}: 'schema' must be an object with a 'required' list")
 
+        if step.get("tools", "read") not in STEP_TOOLS:
+            errors.append(f"{where}: 'tools' must be one of {sorted(STEP_TOOLS)}")
+
         inputs = step.get("inputs", [])
         if not isinstance(inputs, list):
             errors.append(f"{where}: 'inputs' must be a list of step ids")
@@ -285,6 +316,9 @@ def validate_manifest(manifest: dict, skill_path: Path, evals: dict | None = Non
 
     for item in eval_items:
         eid = item.get("id")
+        expectations = item.get("expectations", [])
+        if not isinstance(expectations, list) or not all(isinstance(e, str) and e.strip() for e in expectations):
+            errors.append(f"eval {eid}: 'expectations' must be a list of non-empty strings")
         golden_dir = item.get("golden_dir")
         if golden_dir and not (skill_path / golden_dir).is_dir():
             errors.append(f"eval {eid}: golden_dir not found: {golden_dir}")
@@ -312,17 +346,17 @@ def validate_manifest(manifest: dict, skill_path: Path, evals: dict | None = Non
     return errors
 
 
-def validate_skill_steps(skill_path: Path) -> list[str]:
-    """Validate a skill's step manifest if it has one. Returns errors."""
+def validate_skill_evals(skill_path: Path) -> list[str]:
+    """Validate a skill's evals/steps.json and evals/evals.json, if present."""
     skill_path = Path(skill_path)
     try:
         manifest = load_manifest(skill_path)
     except json.JSONDecodeError as e:
         return [f"Invalid JSON in {MANIFEST_RELPATH}: {e}"]
-    if manifest is None:
-        return []
     try:
         evals = load_evals(skill_path)
     except json.JSONDecodeError as e:
         return [f"Invalid JSON in {EVALS_RELPATH}: {e}"]
-    return validate_manifest(manifest, skill_path, evals)
+    if manifest is None and evals is None:
+        return []
+    return validate_manifest(manifest or IMPLICIT_MANIFEST, skill_path, evals)

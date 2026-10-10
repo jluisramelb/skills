@@ -3,8 +3,8 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from scripts.quick_validate import validate_skill
-from scripts.step_manifest import downstream, topological_order, upstream, validate_manifest, validate_skill_steps
+from scripts.validate import validate_skill
+from scripts.manifest import downstream, topological_order, upstream, validate_manifest, validate_skill_evals
 from tests.fixtures import evals, make_skill, manifest
 
 REPO_SKILLS = Path(__file__).resolve().parents[2]
@@ -89,7 +89,7 @@ class StepManifestTests(unittest.TestCase):
         self.assertTrue(any("'rubric'" in x for x in errs), errs)
         self.assertTrue(any("unknown step 'ghost'" in x for x in errs), errs)
 
-    def test_quick_validate_reports_manifest_errors(self):
+    def test_validate_reports_manifest_errors(self):
         m = manifest()
         m["steps"][0]["inputs"] = ["count"]
         skill = make_skill(self.root, m)
@@ -97,14 +97,40 @@ class StepManifestTests(unittest.TestCase):
         self.assertFalse(ok)
         self.assertIn("cycle", message)
 
-    def test_skill_without_manifest_is_unchanged(self):
-        skill = make_skill(self.root)
+    def test_skill_without_manifest_is_one_implicit_step(self):
+        skill = make_skill(self.root, evals_data={"evals": [
+            {"id": 1, "prompt": "Write about otters", "expectations": ["Mentions otters"],
+             "step_assertions": {"result": [{"text": "Not empty", "kind": "programmatic",
+                                             "check": {"type": "word_count", "min": 1}}]}},
+        ]})
         (skill / "evals" / "steps.json").unlink()
-        self.assertEqual(validate_skill_steps(skill), [])
+        self.assertEqual(validate_skill_evals(skill), [])
         self.assertEqual(validate_skill(skill), (True, "Skill is valid!"))
 
+    def test_skill_without_manifest_rejects_unknown_steps_and_bad_expectations(self):
+        skill = make_skill(self.root, evals_data={"evals": [
+            {"id": 1, "prompt": "x", "expectations": [""], "step_assertions": {"extract": []}},
+        ]})
+        (skill / "evals" / "steps.json").unlink()
+        errors = validate_skill_evals(skill)
+        self.assertIn("eval 1: step_assertions references unknown step 'extract'", errors)
+        self.assertIn("eval 1: 'expectations' must be a list of non-empty strings", errors)
+
+    def test_skill_without_evals_is_valid(self):
+        skill = make_skill(self.root)
+        (skill / "evals" / "steps.json").unlink()
+        (skill / "evals" / "evals.json").unlink()
+        self.assertEqual(validate_skill_evals(skill), [])
+
+    def test_folder_name_must_match_skill_name(self):
+        skill = make_skill(self.root)
+        renamed = skill.rename(self.root / "other-name")
+        ok, message = validate_skill(renamed)
+        self.assertFalse(ok)
+        self.assertEqual(message, "Name 'tiny-skill' must match the folder name 'other-name'")
+
     def test_internal_comms_pilot_manifest_is_valid(self):
-        self.assertEqual(validate_skill_steps(REPO_SKILLS / "internal-comms"), [])
+        self.assertEqual(validate_skill_evals(REPO_SKILLS / "internal-comms"), [])
 
 
 if __name__ == "__main__":

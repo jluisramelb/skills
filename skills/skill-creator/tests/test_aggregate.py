@@ -3,14 +3,9 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from scripts.aggregate_benchmark import generate_benchmark, generate_markdown
-from scripts.run_step_eval import plan_jobs, run_job
+from scripts.aggregate import generate_benchmark, generate_markdown
+from scripts.run_evals import plan_jobs, run_job
 from tests.fixtures import make_skill, scripted_executor
-
-
-def _grading(pass_rate):
-    return {"summary": {"pass_rate": pass_rate, "passed": int(pass_rate * 2), "failed": 2 - int(pass_rate * 2), "total": 2},
-            "expectations": []}
 
 
 class AggregateStepsTests(unittest.TestCase):
@@ -104,20 +99,37 @@ class AggregateStepsTests(unittest.TestCase):
         self.assertIn("model_gap", md)
 
 
-class AggregateBackwardCompatTests(unittest.TestCase):
-    def test_no_step_summary_for_classic_workspace(self):
+class AggregateBaselineTests(unittest.TestCase):
+    def test_delta_against_no_skill_baseline_and_failing_checks(self):
         with tempfile.TemporaryDirectory() as tmp:
-            ws = Path(tmp)
-            for config, rate in (("with_skill", 1.0), ("without_skill", 0.5)):
-                for r in (1, 2):
-                    run = ws / "eval-0" / config / f"run-{r}"
-                    run.mkdir(parents=True)
-                    (run / "grading.json").write_text(json.dumps(_grading(rate)))
-            benchmark = generate_benchmark(ws, "x")
-            self.assertNotIn("step_summary", benchmark)
-            self.assertEqual(benchmark["run_summary"]["delta"]["pass_rate"], "+0.50")
-            self.assertEqual(benchmark["metadata"]["runs_per_configuration"], 2)
-            self.assertNotIn("Step Breakdown", generate_markdown(benchmark))
+            root = Path(tmp)
+            skill = make_skill(root)
+            ws = root / "ws"
+            bad = scripted_executor({"m": {"03-write.md": "Beavers build dams."}})
+            for job in plan_jobs(skill, ws, ["m"], 2, None, [], None, 60):
+                run_job(job, scripted_executor({}))
+            for job in plan_jobs(skill, ws, ["m"], 2, None, [], "no_skill", 60, use_skill=False):
+                run_job(job, bad)
+            benchmark = generate_benchmark(ws, "tiny-skill")
+
+        self.assertEqual(sorted(benchmark["run_summary"]), ["m", "m__no_skill"])
+        delta = benchmark["deltas"]["m__no_skill"]
+        self.assertEqual((delta["skill"], delta["baseline"]), ("m", "m__no_skill"))
+        self.assertGreater(delta["pass_rate"], 0)
+        failing = {(f["config"], f["step"], f["text"]): f["failures"] for f in benchmark["failing_checks"]}
+        self.assertEqual(failing[("m__no_skill", "write", "Mentions otters")], 2)
+        self.assertNotIn("m", {f["config"] for f in benchmark["failing_checks"]})
+        md = generate_markdown(benchmark)
+        self.assertIn("m vs m__no_skill: pass rate +", md)
+        self.assertIn("LLM-graded checks are pending", md)
+        self.assertIn("## Failing checks", md)
+
+    def test_empty_workspace(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            benchmark = generate_benchmark(Path(tmp), "x")
+        self.assertIsNone(benchmark["step_summary"])
+        self.assertEqual(benchmark["run_summary"], {})
+        self.assertIn("# Benchmark: x", generate_markdown(benchmark))
 
 
 if __name__ == "__main__":
