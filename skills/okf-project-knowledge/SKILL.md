@@ -1,6 +1,6 @@
 ---
 name: okf-project-knowledge
-description: Bootstrap or maintain a project knowledge bundle in Google's Open Knowledge Format (OKF). Use when asked to document a software project's architecture, data model, APIs, dependencies, decisions, or to create or update an agent-readable project wiki using GitHub Copilot.
+description: Bootstrap or maintain a source-grounded project knowledge bundle or cross-repository code navigation graph in Google's Open Knowledge Format (OKF). Use when asked to document architecture, data models, APIs, dependencies, decisions, or help agents route through a multi-repository codebase using GitHub Copilot.
 license: Apache-2.0
 ---
 
@@ -31,6 +31,68 @@ Create and maintain a grounded, portable knowledge bundle for a software project
 5. **Create navigation and history.** Add a root `index.md` with links and short summaries, and an append-only `log.md` describing the bootstrap or update. These are OKF-reserved filenames, not concept documents. Add nested `index.md` files when they make a large bundle easier to navigate.
 6. **Check for gaps.** Compare the new pages against the inspected project structure. Record important undocumented areas, uncertain claims, and unanswered questions in a `gaps.md` concept if useful. Do not imply that the bundle is complete when it is not.
 7. **Verify the result.** Check that each concept has valid YAML frontmatter with `type`, links point to the intended bundle paths, the index reflects the actual pages, and the log records the work. Summarize the project areas covered, pages created or updated, and remaining gaps.
+
+## Cross-repository code navigation graph
+
+When the goal is to help agents navigate a multi-repository codebase, model the bundle as a graph of OKF concepts connected by standard Markdown links. The graph is a routing aid, not an authority: source code, repository configuration, and contracts remain the source of truth.
+
+### Node types
+
+Use descriptive OKF `type` values for these concepts. Create only types that correspond to real, useful navigation targets:
+
+| Node type | Purpose |
+| --- | --- |
+| `Repository` | Identifies one Bitbucket Cloud repository and its purpose; the graph's entry point for locating code. |
+| `Module` | Identifies a meaningful package, module, or code area within a repository; narrows investigation to a source subtree. |
+| `Service` | Identifies a deployable or runtime application/component; connects code locations to runtime responsibilities. |
+| `Entry Point` | Identifies where behavior begins, such as a route, handler, command, scheduled job, or event consumer. |
+| `API` | Identifies a contract or interface, including HTTP APIs, schemas, RPC interfaces, or shared library interfaces. |
+| `Data Store` | Identifies a database, queue, object store, or other persistence system when it is important for tracing behavior. |
+| `Schema` | Identifies the authoritative schema or migration set for a data resource. |
+| `Team` | Identifies an owning team only when ownership is confirmed from an authoritative source and useful for routing. |
+
+A node is one coherent concept, not every file or symbol. Group small or tightly coupled code areas when that produces a clearer route. Give each concept a stable, readable bundle path; qualify repository identities with the Bitbucket workspace and repository slug to avoid collisions.
+
+### Edge types and direction
+
+Represent edges as ordinary Markdown links with explicit relationship wording in the surrounding sentence or table. Keep the link on the target concept and write each relationship from the source node's perspective:
+
+| Relationship | Direction and meaning | Evidence to look for |
+| --- | --- | --- |
+| `contains` | Repository or module → contained module, service, entry point, API, or schema. Structural location only; it does not imply runtime coupling. | Repository tree, build configuration, package boundaries. |
+| `depends on` | Consumer → dependency; identifies build-time or runtime dependency. | Import/manifests, dependency injection, deployment or service configuration. State whether build-time or runtime when known. |
+| `calls` | Caller/entry point → invoked service, API, or module; follows synchronous execution. | Call sites, generated clients, routing or invocation configuration. |
+| `implements` | Implementation module/service → API or contract it fulfills. | Handler registration, interface implementation, schema/client generation configuration, contract tests. |
+| `publishes` | Producer → event/topic/queue contract or destination. | Producer code and broker/topic configuration. |
+| `consumes` | Consumer → event/topic/queue contract or source. | Consumer registration and broker/topic configuration. |
+| `routes to` | Route or entry point → handler/service that receives the request or work. | Router, framework registration, gateway configuration. |
+| `reads` / `writes` | Component → data store or schema it reads from or writes to. | Queries, repository/data-access code, migrations, ORM mappings, runtime configuration. |
+| `owned by` | Repository or component → team concept. | Authoritative CODEOWNERS, Bitbucket project/repository metadata, or confirmed ownership record. |
+
+Do not infer an edge from naming similarity, directory co-location, or a README claim alone when implementation or authoritative configuration can be checked. If the relationship is plausible but unverified, record it as an open question in the concept or gaps page, not as a confirmed graph edge. Include brief qualifiers where direction alone is insufficient, such as protocol, dependency kind, or event/topic name.
+
+### Identity, provenance, and multi-repository layout
+
+- Give each repository concept a Bitbucket Cloud URL and verified workspace/repository slug. Record the default branch only after checking Bitbucket metadata or repository configuration.
+- For every code-backed concept, identify its repository and the narrowest useful source paths. Record the branch/commit or other revision inspected so agents can detect whether the description may be stale. Do not present a branch name as an immutable revision.
+- Use OKF `sources` for source materials when practical. Source paths should be scoped to the repository concept and be resolvable by an authorized agent; use a Bitbucket URL or an unambiguous repository-relative path plus repository identity. Attribute important claims with source footnotes when that helps verification.
+- Prefer a central OKF bundle as the cross-repository catalog and graph entry point. It should contain repository and system-level concepts, linking to component concepts. Repo-local OKF bundles are optional replicas or focused details: avoid competing definitions, identify the canonical concept, and link back to it.
+- Do not copy source code into the graph. Preserve Bitbucket authorization boundaries: only expose metadata to agents permitted to see it, and never assume that access to the central bundle grants access to linked repositories.
+
+### Agent routing and freshness
+
+For a codebase question or change, agents should:
+
+1. Start at the central `index.md`, find the relevant system or repository concept, and follow only the links needed to identify likely components, entry points, contracts, and data resources.
+2. Confirm the agent is authorized to access each linked repository, then inspect the referenced source and current repository revision in Bitbucket.
+3. Treat graph descriptions as search hints. Resolve disagreements in favor of current source/configuration, and correct the graph only after confirming the evidence.
+4. If a link is broken, a repository is inaccessible, or the referenced revision has moved, report that limitation and search the source directly where authorized. Never fill a gap with an assumed relationship.
+
+On refresh, compare each concept's recorded source revision with the revision inspected. Re-check edges affected by changed source paths, manifests, routes, contracts, ownership, or persistence configuration; update relevant concepts and the index, and append a `log.md` entry. Flag concepts whose source or revision cannot be verified as potentially stale. Do not mark a concept verified or current merely because an automated refresh ran. Keep automated Bitbucket-triggered updates opt-in, use least-privilege credentials, and do not bypass repository permissions.
+
+### Pilot evaluation
+
+Before scaling the graph across all repositories, test a representative set of real tasks. For each task, check whether an agent can identify the relevant repository, component, behavior entry point, cross-repository dependencies, and authoritative source paths; then verify those choices against Bitbucket code. Track incorrect or missing routes, unsupported edges, inaccessible links, and stale revision references. Refine node/edge definitions and coverage based on those failures rather than adding speculative graph detail.
 
 ## OKF document conventions
 
