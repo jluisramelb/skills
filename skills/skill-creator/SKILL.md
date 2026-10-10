@@ -1,20 +1,12 @@
 ---
 name: skill-creator
-description: Create, improve and evaluate agent skills for GitHub Copilot CLI (folders with a SKILL.md in .github/skills or ~/.copilot/skills). Use when the user wants to turn a workflow into a skill, write or edit a SKILL.md, test a skill with evals across models, find out why a skill behaves differently from run to run, or make a skill trigger more reliably, even if they just say "make this repeatable".
+description: Create, revise, validate, and evaluate reliable GitHub Copilot CLI skills. Use when turning a workflow or idea into a skill, fixing a skill that produces inconsistent results, improving skill instructions, or diagnosing why a skill fails to activate. Prefer minimal instructions, deterministic scripts for exact work, and evidence from evaluations over assumptions.
 license: Apache-2.0. Complete terms in LICENSE.txt
 ---
 
 # Skill Creator
 
-A skill is a folder with a `SKILL.md`. Copilot reads every skill's `name` and `description`, and loads the body when a task matches. This skill helps you write one, prove it works, and make it reliable across runs and models.
-
-Work out where the user is and start there:
-- an idea → §1
-- a draft → §3
-- a skill that drifts or breaks → §3–4
-- a skill that doesn't load when it should → §5
-
-If they only want a quick draft, write it, validate it, and skip the evals.
+Create the smallest skill that reliably completes its intended task. A skill is a folder with a `SKILL.md`. Copilot reads every skill's `name` and `description`, and loads the body when a task matches.
 
 ## Principles
 
@@ -29,15 +21,26 @@ These come from [pstack](https://github.com/cursor/plugins/tree/main/pstack). Ap
 - **Never block on the human.** Make reasonable defaults and keep going. Show results and let the user correct you. Ask first only for things that are hard to undo, such as overwriting someone's skill.
 - **Guard the context window.** The scripts run the matrix. Read `benchmark.md`, not raw logs, and hand bulk reading to subagents.
 
-## 1. Capture intent
+## 1. Determine the task
 
-If the conversation already shows the workflow ("turn this into a skill"), get it from there: the steps, tools, inputs and outputs, and the user's corrections. Then fill the gaps:
-- What should the skill let Copilot do, and what does a good result look like?
-- When should it load? Collect the phrases and situations, including ones where the user won't name it.
-- What are the inputs, outputs, edge cases and dependencies?
-- Is the output verifiable? File transforms, extraction, code and fixed workflows deserve evals. For style-only skills, a human look is usually enough.
+Choose the applicable path:
+- **Idea:** identify the workflow, then create a skill (§2–3).
+- **Existing draft:** inspect it, correct problems, and validate it (§2, then §3).
+- **Unreliable skill:** reproduce the failure, identify the root cause, and test the fix (§3–4).
+- **Activation problem:** inspect the description and test triggering behavior (§5).
 
-Ask only what you can't infer. Research docs or similar skills in parallel with subagents if that helps.
+Use the conversation as the primary source of requirements. Infer reasonable defaults and continue without asking questions unless a decision is consequential or difficult to reverse.
+
+Before writing, establish:
+- **Purpose:** what task the skill completes and what a good result looks like.
+- **Triggers:** explicit requests and less obvious situations in which it should activate.
+- **Inputs and outputs:** required information, output format, and missing-input behavior.
+- **Constraints:** tools, dependencies, permissions, and safety boundaries.
+- **Verification:** how to determine whether the result is correct. File transforms, extraction, code and fixed workflows deserve evals; for style-only skills a human look is usually enough.
+
+Research external documentation when platform behavior or compatibility is uncertain.
+
+If the user only wants a quick draft, write it, validate it, and skip the evals.
 
 ## 2. Write the skill
 
@@ -45,7 +48,7 @@ Ask only what you can't infer. Research docs or similar skills in parallel with 
 - **Project skills:** `.github/skills/<name>/` (also `.claude/skills/` and `.agents/skills/`), for skills about one repository.
 - **Personal skills:** `~/.copilot/skills/<name>/` (or `~/.agents/skills/`), for skills you use everywhere.
 
-Pick the obvious one and tell the user. The folder name must equal `name`.
+Pick the location that matches the skill's scope and tell the user. The folder name must equal `name`. A skill that is only `SKILL.md` can be installed with `copilot skill add <file>`; anything with bundled files needs the whole folder (§6). Run `/skills reload` afterward.
 
 ```
 <name>/
@@ -88,7 +91,7 @@ Put the evals in the skill's `evals/` folder. Read `references/evals.md` for the
 3. **Dry run.** Use `python -m scripts.run_evals --skill-path <skill> --workspace <ws>/iteration-0 --models dry --runs 1 --dry-run`. Every check should pass on the golden artifacts. If one doesn't, the check is wrong.
 4. **Run the matrix** with your everyday model and your strongest model, at least 5 runs each. Also run a baseline: `--no-skill` for a new skill, or a snapshot of the old version with `--label old_skill`. Add `--isolate all` when there are steps, to separate a step's own failures from inherited ones. Each step is a `copilot -p --model` call. `--allow-all-tools` is required in non-interactive mode, so run evals only on skills you trust.
 5. **Aggregate** with `python -m scripts.aggregate <ws>/iteration-N --skill-name <name>`, then read `benchmark.md`. Grade any pending LLM checks before you trust a pass rate. Open the artifacts behind surprising cells.
-6. **Report** to the user: the pass rates against the baseline, the flagged steps, and two or three concrete examples with their file paths. Ask for feedback, but go ahead with the obvious fixes.
+6. **Report** as described in [Report](#report).
 
 ## 4. Improve
 
@@ -112,6 +115,17 @@ Add about 20 queries to `evals/triggers.json`, roughly half that should trigger 
 - Or register a parent folder that holds several skills with `copilot skill add <dir>`.
 - `copilot skill add <file>` copies only `SKILL.md`, so use it only for skills without bundled files.
 - Then run `/skills reload` in Copilot CLI.
+
+## Report
+
+Tell the user:
+- the skill's location and purpose
+- the validation and tests completed
+- evaluation results compared with the baseline, when measured
+- known limitations and flagged failures
+- a small number of concrete examples, with artifact paths when available
+
+Never describe an unrun test as passing. Ask for feedback after presenting the working result, and make obvious improvements without waiting for approval.
 
 ## Scripts
 
